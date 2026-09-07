@@ -1,12 +1,20 @@
 [Unit]
 Description=Acer Fan Profile Sync
-After=dbus.service power-profiles-daemon.service[cite: 4]
+Documentation=https://github.com/MaksSuRitik/acer-sense
+# ec_sys пишет в debugfs — монтирование должно быть завершено
+After=local-fs.target dbus.service power-profiles-daemon.service
+Requires=power-profiles-daemon.service
 
 [Service]
-Type=simple[cite: 4]
+Type=simple
+ExecStartPre=/sbin/modprobe ec_sys write_support=1
 ExecStart=/usr/lib/acer-sense/scripts/acer-fans.sh
-Restart=always[cite: 4]
-RestartSec=2[cite: 4]
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+# Служба должна иметь доступ к debugfs
+SupplementaryGroups=
 
 [Install]
-WantedBy=graphical.target[cite: 4]
+WantedBy=graphical.target

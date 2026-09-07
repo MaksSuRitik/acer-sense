@@ -1,11 +1,15 @@
 [Unit]
-Description=Acer Mic LED Sync On Startup
-After=graphical-session.target
+Description=Acer Sense: Sync microphone LED state at session start
+After=graphical-session.target pipewire.service wireplumber.service
+Wants=pipewire.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/lib/acer-sense/scripts/mic-sync.sh
+# Передаём аргумент sync явно — скрипт синхронизирует LED один раз при старте
+ExecStart=/usr/lib/acer-sense/scripts/mic-sync.sh sync
 RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=graphical-session.target

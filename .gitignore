@@ -1,4 +1,12 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Arch packaging & makepkg artifacts
 pkg/
 src/acer-sense/
+*.pkg.tar.*
 *.tar.zst
 acer-sense/
+*.log

@@ -1,226 +1,415 @@
-from PyQt6.QtCore import Qt, QTimer, QRectF
-from PyQt6.QtGui import QColor, QFont, QPainter, QPen
+from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
+from PyQt6.QtGui import QColor, QFont, QPainter, QPen, QPainterPath, QBrush
 from PyQt6.QtWidgets import (QButtonGroup, QFrame, QGridLayout, QHBoxLayout,
-                             QLabel, QPushButton, QVBoxLayout, QWidget)
+                              QLabel, QPushButton, QVBoxLayout, QWidget)
 
 from core.power import get_power_profile, set_power_profile
-from core.sensors import get_battery_info, get_cpu_temp, get_cpu_usage, get_ram_info
+from core.sensors import (get_battery_info, get_cpu_temp, get_cpu_usage,
+                           get_gpu_temp, get_ram_info)
+from ui.details_dialogs import BatteryInfoDialog
+
+ACCENT      = "#388e6a"
+ACCENT_DARK = "#27684d"
+ACCENT_BG   = "#e9f5f0"
+TEXT_DARK   = "#2c3833"
+TEXT_MUTED  = "#73857e"
+BG_CARD     = "#ffffff"
+
+_PROFILE_MODES = [
+    ("power-saver",  "Бесшумно",         "Энергосбережение"),
+    ("balanced",     "Обычный",           "Оптимальный баланс"),
+    ("performance",  "Производительность","Максимум мощности"),
+]
+
+_PROFILE_HINTS = {
+    "power-saver": "Ограничивает частоты ЦП и снижает шум вентиляторов. Идеально для работы от батареи, чтения и онлайн-звонков.",
+    "balanced":    "Автоматически регулирует производительность под текущие задачи: работа с документами, браузинг, видео.",
+    "performance": "Максимальная вычислительная мощность и активное охлаждение. Рекомендуется для игр, компиляции и рендеринга.",
+}
 
 
-ACCENT = "#4ba781"
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Прогресс-кольцо (чистый минимализм)
+# ──────────────────────────────────────────────────────────────────────────────
 
 class RingProgress(QWidget):
-    def __init__(self, size: int = 74, parent=None):
+    def __init__(self, size: int = 68, parent=None):
         super().__init__(parent)
         self.setFixedSize(size, size)
-        self.value = 0
+        self.value = 0.0
+        self.label = ""
 
-    def set_value(self, value: float):
-        self.value = max(0, min(100, value))
+    def set_value(self, value: float, label: str = ""):
+        self.value = max(0.0, min(100.0, value))
+        self.label = label
         self.update()
 
-    def paintEvent(self, event):
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        rect = QRectF(8, 8, self.width() - 16, self.height() - 16)
-        pen = QPen(QColor("#dcebe4"), 6)
-        painter.setPen(pen)
-        painter.drawArc(rect, 0, 360 * 16)
-        pen.setColor(QColor(ACCENT))
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        painter.setPen(pen)
-        painter.drawArc(rect, 90 * 16, int(-self.value * 3.6 * 16))
-        painter.setPen(QColor("#535b57"))
-        painter.setFont(QFont("Inter", 10, QFont.Weight.DemiBold))
-        painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, f"{int(self.value)}%")
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(7, 7, self.width() - 14, self.height() - 14)
+
+        # Фоновый трек
+        p.setPen(QPen(QColor("#e4eee8"), 6))
+        p.drawArc(r, 0, 360 * 16)
+
+        # Активная дуга
+        if self.value > 0:
+            fill_pen = QPen(QColor(ACCENT), 6)
+            fill_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(fill_pen)
+            p.drawArc(r, 90 * 16, int(-self.value * 3.6 * 16))
+
+        # Значение в центре
+        p.setPen(QColor(TEXT_DARK))
+        p.setFont(QFont("Inter", 10, QFont.Weight.DemiBold))
+        text = self.label if self.label else f"{int(self.value)}%"
+        p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
 
 
-class WelcomeIllustration(QFrame):
-    """CSS-only illustration so the package stays self-contained and lightweight."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setMinimumHeight(205)
-        self.setMaximumHeight(240)
-        self.setStyleSheet("""
-            QFrame { border: 0; border-radius: 22px;
-              background: qradialgradient(cx:0.5, cy:0.3, radius:0.85, stop:0 #fbfffc, stop:1 #eaf8f1); }
-        """)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(28, 15, 28, 15)
-        layout.addStretch(1)
-        scene = QLabel("◜     ◯     ♫\n\n          ▱\n      ━━━━━━━━━")
-        scene.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        scene.setStyleSheet("background: transparent; color: #61b894; font-size: 25px; font-weight: 300; line-height: 1.2;")
-        layout.addWidget(scene)
-        layout.addStretch(1)
-
+# ──────────────────────────────────────────────────────────────────────────────
+# Строгая кнопка профиля питания с векторной геометрической иконкой (без эмодзи)
+# ──────────────────────────────────────────────────────────────────────────────
 
 class ProfileButton(QPushButton):
-    def __init__(self, icon: str, label: str, parent=None):
-        super().__init__(f"{icon}\n{label}", parent)
+    def __init__(self, mode: str, label: str, subtitle: str, parent=None):
+        super().__init__(parent)
+        self._mode = mode
+        self._label = label
+        self._subtitle = subtitle
         self.setCheckable(True)
-        self.setMinimumSize(118, 76)
+        self.setMinimumSize(130, 84)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setStyleSheet(f"""
-            QPushButton {{ border: 0; border-radius: 13px; color: #5f6863; background: transparent;
-                            font-size: 12px; font-weight: 600; padding: 6px 5px; }}
-            QPushButton:checked {{ color: white; background: {ACCENT}; }}
-            QPushButton:hover:!checked {{ background: #f0f7f3; color: #357d61; }}
-        """)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = self.width()
+        h = self.height()
+        active = self.isChecked()
+        hover = self.underMouse()
+
+        # Фоновая карточка
+        bg_rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
+        if active:
+            bg_color = QColor(ACCENT)
+            border_color = QColor(ACCENT_DARK)
+        elif hover:
+            bg_color = QColor("#f2f8f5")
+            border_color = QColor("#b9decb")
+        else:
+            bg_color = QColor("#ffffff")
+            border_color = QColor("#dbe5e0")
+
+        p.setBrush(QBrush(bg_color))
+        p.setPen(QPen(border_color, 1.5))
+        p.drawRoundedRect(bg_rect, 12, 12)
+
+        # Цвет элементов
+        icon_pen = QPen(QColor("#ffffff") if active else QColor(ACCENT), 2)
+        icon_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        icon_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        p.setPen(icon_pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+
+        # Отрисовка векторной иконки (по центру сверху)
+        cx = w / 2.0
+        cy = 24.0
+
+        if self._mode == "power-saver":
+            # Иконка листка / эко (чистая геометрия)
+            path = QPainterPath()
+            path.moveTo(cx - 7, cy + 5)
+            path.quadTo(cx - 7, cy - 7, cx + 5, cy - 7)
+            path.quadTo(cx + 5, cy + 5, cx - 7, cy + 5)
+            path.moveTo(cx - 5, cy + 3)
+            path.lineTo(cx + 1, cy - 3)
+            p.drawPath(path)
+
+        elif self._mode == "balanced":
+            # Иконка двух параллельных слайдеров баланса
+            p.drawLine(QPointF(cx - 8, cy - 4), QPointF(cx + 8, cy - 4))
+            p.drawLine(QPointF(cx - 8, cy + 4), QPointF(cx + 8, cy + 4))
+            # Ползунки
+            p.setBrush(QBrush(QColor("#ffffff") if active else QColor(ACCENT)))
+            p.drawEllipse(QPointF(cx - 2, cy - 4), 3, 3)
+            p.drawEllipse(QPointF(cx + 3, cy + 4), 3, 3)
+
+        elif self._mode == "performance":
+            # Иконка датчика турбо / стрелка мощности
+            path = QPainterPath()
+            path.moveTo(cx - 7, cy + 4)
+            path.arcTo(QRectF(cx - 8, cy - 8, 16, 16), 210, -240)
+            p.drawPath(path)
+            # Стрелка вправо-вверх
+            p.drawLine(QPointF(cx, cy), QPointF(cx + 4, cy - 4))
+
+        # Заголовок
+        p.setFont(QFont("Inter", 11, QFont.Weight.Bold if active else QFont.Weight.DemiBold))
+        p.setPen(QColor("#ffffff") if active else QColor(TEXT_DARK))
+        label_rect = QRectF(4, cy + 12, w - 8, 18)
+        p.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, self._label)
+
+        # Подзаголовок
+        p.setFont(QFont("Inter", 8, QFont.Weight.Normal))
+        p.setPen(QColor("#e4f7ee") if active else QColor(TEXT_MUTED))
+        sub_rect = QRectF(4, cy + 30, w - 8, 14)
+        p.drawText(sub_rect, Qt.AlignmentFlag.AlignCenter, self._subtitle)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HomeTab
+# ──────────────────────────────────────────────────────────────────────────────
 
 class HomeTab(QWidget):
     def __init__(self):
         super().__init__()
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(104, 28, 104, 44)
-        layout.setSpacing(52)
+        self._gpu_available: bool | None = None
 
+        root = QHBoxLayout(self)
+        root.setContentsMargins(80, 24, 80, 36)
+        root.setSpacing(36)
+
+        # ── Левая колонка ──────────────────────────────────────────────────
         left = QVBoxLayout()
-        left.setSpacing(12)
+        left.setSpacing(14)
         left.setAlignment(Qt.AlignmentFlag.AlignTop)
-        welcome = QLabel("Вас приветствует AcerSense")
-        welcome.setStyleSheet("font-size: 21px; font-weight: 700; color: #343b37;")
-        left.addWidget(welcome)
-        registration = QLabel("Зарегистрировать устройство.                                      ›")
-        registration.setFixedHeight(30)
-        registration.setStyleSheet("background: #ffffff; border-radius: 5px; color: #6f7873; font-size: 12px; padding: 0 9px;")
-        left.addWidget(registration)
-        left.addWidget(WelcomeIllustration())
-        modes_title = QLabel("Режим использования системы                                  ⓘ")
-        modes_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        modes_title.setStyleSheet("font-size: 12px; color: #79837e; margin-top: 8px;")
-        left.addWidget(modes_title)
-        mode_panel = QFrame()
-        mode_panel.setStyleSheet("QFrame { background: #ffffff; border: 1px solid #e5ebe7; border-radius: 15px; }")
-        mode_layout = QHBoxLayout(mode_panel)
-        mode_layout.setContentsMargins(6, 5, 6, 5)
-        mode_layout.setSpacing(1)
+
+        # Заголовок секции
+        welcome_box = QVBoxLayout()
+        welcome_box.setSpacing(2)
+        welcome_title = QLabel("Управление системой")
+        welcome_title.setStyleSheet("font-size: 22px; font-weight: 700; color: #222d28;")
+        welcome_sub = QLabel("Режимы энергопотребления и аппаратный контроль Acer")
+        welcome_sub.setStyleSheet("font-size: 12px; color: #73857e;")
+        welcome_box.addWidget(welcome_title)
+        welcome_box.addWidget(welcome_sub)
+        left.addLayout(welcome_box)
+
+        # Карточка режимов питания
+        profiles_card = QFrame()
+        profiles_card.setStyleSheet(f"""
+            QFrame {{
+                background: #ffffff;
+                border: 1px solid #dde7e2;
+                border-radius: 16px;
+            }}
+        """)
+        pc_layout = QVBoxLayout(profiles_card)
+        pc_layout.setContentsMargins(18, 18, 18, 18)
+        pc_layout.setSpacing(14)
+
+        sec_header = QHBoxLayout()
+        sec_title = QLabel("Режим использования системы")
+        sec_title.setStyleSheet("font-size: 14px; font-weight: 700; color: #323d38; border: 0;")
+        sec_shortcut = QLabel("Переключение: Fn + F")
+        sec_shortcut.setStyleSheet("font-size: 11px; color: #758680; background: #f0f5f2; padding: 3px 8px; border-radius: 6px; border: 1px solid #d8e5df;")
+        sec_header.addWidget(sec_title)
+        sec_header.addStretch()
+        sec_header.addWidget(sec_shortcut)
+        pc_layout.addLayout(sec_header)
+
+        # Кнопки профилей
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
         self.profile_group = QButtonGroup(self)
-        profile = get_power_profile()
-        for icon, label, mode in (("◴", "Бесшумно", "power-saver"),
-                                  ("◔", "Обычный", "balanced"),
-                                  ("◕", "Производительность", "performance")):
-            button = ProfileButton(icon, label)
-            button.setChecked(profile == mode)
-            button.clicked.connect(lambda checked, value=mode: set_power_profile(value))
-            self.profile_group.addButton(button)
-            mode_layout.addWidget(button)
-        left.addWidget(mode_panel)
-        mode_hint = QLabel("Для работы, например, с Microsoft Office.")
-        mode_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        mode_hint.setStyleSheet("font-size: 11px; color: #919a95;")
-        left.addWidget(mode_hint)
+        self._profile_buttons: dict[str, ProfileButton] = {}
+        curr_profile = get_power_profile()
+
+        for mode, label, sub in _PROFILE_MODES:
+            btn = ProfileButton(mode, label, sub)
+            btn.setChecked(mode == curr_profile)
+            btn.clicked.connect(lambda _, m=mode: self._on_profile_clicked(m))
+            self.profile_group.addButton(btn)
+            self._profile_buttons[mode] = btn
+            btn_row.addWidget(btn)
+
+        pc_layout.addLayout(btn_row)
+
+        # Описание выбранного профиля
+        self.mode_hint_box = QFrame()
+        self.mode_hint_box.setStyleSheet("background: #f7faf8; border: 1px solid #e1ebe6; border-radius: 10px;")
+        hint_lo = QVBoxLayout(self.mode_hint_box)
+        hint_lo.setContentsMargins(14, 12, 14, 12)
+        self.mode_hint = QLabel(_PROFILE_HINTS.get(curr_profile, ""))
+        self.mode_hint.setWordWrap(True)
+        self.mode_hint.setStyleSheet("font-size: 11px; color: #586962; line-height: 1.4; border: 0; background: transparent;")
+        hint_lo.addWidget(self.mode_hint)
+        pc_layout.addWidget(self.mode_hint_box)
+
+        left.addWidget(profiles_card)
         left.addStretch(1)
 
+        # ── Правая колонка ─────────────────────────────────────────────────
         right = QVBoxLayout()
         right.setSpacing(14)
         right.setAlignment(Qt.AlignmentFlag.AlignTop)
-        right.addWidget(self._make_insight_card())
         right.addWidget(self._make_stats_card())
         right.addWidget(self._make_battery_card())
         right.addStretch(1)
 
-        left_holder = QWidget()
-        left_holder.setLayout(left)
-        left_holder.setMinimumWidth(510)
-        left_holder.setMaximumWidth(610)
-        right_holder = QWidget()
-        right_holder.setLayout(right)
-        right_holder.setFixedWidth(300)
-        layout.addWidget(left_holder, 1)
-        layout.addWidget(right_holder)
+        left_w = QWidget()
+        left_w.setLayout(left)
+        left_w.setMinimumWidth(500)
 
+        right_w = QWidget()
+        right_w.setLayout(right)
+        right_w.setFixedWidth(330)
+
+        root.addWidget(left_w, 1)
+        root.addWidget(right_w)
+
+        # Таймер обновления телеметрии
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_stats)
         self.timer.start(2000)
         self.update_stats()
 
-    def _card(self) -> QFrame:
-        card = QFrame()
-        card.setStyleSheet("QFrame { background: #ffffff; border: 1px solid #e4e9e6; border-radius: 16px; }")
-        return card
-
-    def _make_insight_card(self) -> QFrame:
-        card = self._card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 12, 12, 12)
-        banner = QFrame()
-        banner.setFixedHeight(75)
-        banner.setStyleSheet("QFrame { border: 0; border-radius: 10px; background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #77ceb0, stop:1 #bcebd9); }")
-        banner_layout = QVBoxLayout(banner)
-        banner_title = QLabel("Acer Sense для Linux")
-        banner_title.setStyleSheet("color: #ffffff; background: transparent; border: 0; font-size: 16px; font-weight: 700;")
-        banner_note = QLabel("Настройте ноутбук под свой ритм работы")
-        banner_note.setStyleSheet("color: #effff7; background: transparent; border: 0; font-size: 11px;")
-        banner_layout.addWidget(banner_title)
-        banner_layout.addWidget(banner_note)
-        layout.addWidget(banner)
-        caption = QLabel("Мониторинг, режимы питания и защита аккумулятора — в одном месте.")
-        caption.setWordWrap(True)
-        caption.setStyleSheet("font-size: 11px; color: #67716c; border: 0; padding: 1px 2px 0;")
-        layout.addWidget(caption)
-        return card
+    # ── Виджеты правой колонки ─────────────────────────────────────────────
 
     def _make_stats_card(self) -> QFrame:
-        card = self._card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 12)
+        card = QFrame()
+        card.setStyleSheet(f"background: {BG_CARD}; border: 1px solid #dde7e2; border-radius: 16px;")
+        lo = QVBoxLayout(card)
+        lo.setContentsMargins(18, 16, 18, 16)
+        lo.setSpacing(12)
+
         title = QLabel("Обзор рабочих параметров")
-        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #646b67; border: 0;")
-        layout.addWidget(title)
+        title.setStyleSheet("font-size: 13px; font-weight: 700; color: #323d38; border: 0;")
+        lo.addWidget(title)
+
         grid = QGridLayout()
-        grid.setHorizontalSpacing(5)
-        for column, name in enumerate(("ОЗУ", "ЦП", "Система")):
-            label = QLabel(name)
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            label.setStyleSheet("font-size: 10px; color: #78827d; border: 0;")
-            grid.addWidget(label, 0, column)
-        self.ram_ring = RingProgress(66)
-        self.cpu_ring = RingProgress(66)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(4)
+
+        for col, name in enumerate(("ОЗУ", "ЦП", "Система")):
+            lbl = QLabel(name)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setStyleSheet("font-size: 11px; font-weight: 600; color: #73857e; border: 0;")
+            grid.addWidget(lbl, 0, col)
+
+        self.ram_ring = RingProgress(64)
+        self.cpu_ring = RingProgress(64)
         grid.addWidget(self.ram_ring, 1, 0, Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.cpu_ring, 1, 1, Qt.AlignmentFlag.AlignCenter)
+
+        self.cpu_col_label = grid.itemAtPosition(0, 1).widget()
+
         self.temp_value = QLabel("—°C")
         self.temp_value.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.temp_value.setStyleSheet("font-size: 19px; font-weight: 700; color: #575f5a; border: 0;")
-        grid.addWidget(self.temp_value, 1, 2)
-        layout.addLayout(grid)
+        self.temp_value.setStyleSheet("font-size: 18px; font-weight: 700; color: #2e3b35; border: 0;")
+        grid.addWidget(self.temp_value, 1, 2, Qt.AlignmentFlag.AlignCenter)
+
+        lo.addLayout(grid)
         return card
 
     def _make_battery_card(self) -> QFrame:
-        card = self._card()
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 11, 12, 12)
+        card = QFrame()
+        card.setStyleSheet(f"background: {BG_CARD}; border: 1px solid #dde7e2; border-radius: 16px;")
+        lo = QVBoxLayout(card)
+        lo.setContentsMargins(18, 16, 18, 16)
+        lo.setSpacing(10)
+
         title = QLabel("Состояние аккумулятора")
-        title.setStyleSheet("font-size: 15px; font-weight: 700; color: #646b67; border: 0;")
-        self.battery_value = QLabel("▰  —")
-        self.battery_value.setStyleSheet(f"font-size: 27px; font-weight: 700; color: {ACCENT}; border: 0; margin-top: 8px;")
-        self.battery_note = QLabel("Информация обновляется автоматически")
-        self.battery_note.setStyleSheet("font-size: 10px; color: #7f8984; border: 0;")
-        line = QFrame()
-        line.setFixedHeight(1)
-        line.setStyleSheet("background: #dcebe4; border: 0; margin: 8px 0 5px;")
-        more = QLabel("Информация о состоянии аккумулятора  ›")
-        more.setStyleSheet(f"font-size: 11px; color: {ACCENT}; font-weight: 600; border: 0;")
-        layout.addWidget(title)
-        layout.addWidget(self.battery_value)
-        layout.addWidget(self.battery_note)
-        layout.addWidget(line)
-        layout.addWidget(more)
+        title.setStyleSheet("font-size: 13px; font-weight: 700; color: #323d38; border: 0;")
+        lo.addWidget(title)
+
+        bat_row = QHBoxLayout()
+        self.battery_pct = QLabel("—%")
+        self.battery_pct.setStyleSheet(f"font-size: 28px; font-weight: 700; color: {ACCENT}; border: 0;")
+        
+        self.battery_status_lbl = QLabel("Питание от батареи")
+        self.battery_status_lbl.setStyleSheet("font-size: 11px; color: #71827b; border: 0; padding-top: 8px;")
+        
+        bat_row.addWidget(self.battery_pct)
+        bat_row.addSpacing(6)
+        bat_row.addWidget(self.battery_status_lbl)
+        bat_row.addStretch()
+        lo.addLayout(bat_row)
+
+        # Бейдж оптимизированной зарядки (80%)
+        self.opt_badge = QFrame()
+        self.opt_badge.setStyleSheet("background: #f0f7f4; border: 1px solid #c2e2d2; border-radius: 8px;")
+        bl = QHBoxLayout(self.opt_badge)
+        bl.setContentsMargins(10, 6, 10, 6)
+        badge_text = QLabel("Оптимизированная зарядка (лимит 80%)")
+        badge_text.setStyleSheet("font-size: 11px; color: #2e6d52; font-weight: 500; border: 0; background: transparent;")
+        bl.addWidget(badge_text)
+        lo.addWidget(self.opt_badge)
+
+        # Настоящая кнопка "Детальные сведения об аккумуляторе"
+        self.btn_battery_details = QPushButton("Детальные сведения об аккумуляторе ›")
+        self.btn_battery_details.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_battery_details.setStyleSheet(f"""
+            QPushButton {{
+                text-align: left;
+                background: transparent;
+                border: 0;
+                color: {ACCENT};
+                font-size: 11px;
+                font-weight: 600;
+                padding: 4px 0;
+            }}
+            QPushButton:hover {{
+                color: {ACCENT_DARK};
+                text-decoration: underline;
+            }}
+        """)
+        self.btn_battery_details.clicked.connect(self._open_battery_info)
+        lo.addWidget(self.btn_battery_details)
+
         return card
 
+    # ── Действия ──────────────────────────────────────────────────────────────
+
+    def _open_battery_info(self):
+        dlg = BatteryInfoDialog(self)
+        dlg.exec()
+
+    def _on_profile_clicked(self, mode: str):
+        set_power_profile(mode)
+        self.mode_hint.setText(_PROFILE_HINTS.get(mode, ""))
+
+    # ── Живое обновление ──────────────────────────────────────────────────────
+
     def update_stats(self):
-        self.cpu_ring.set_value(get_cpu_usage())
+        cpu = get_cpu_usage()
+        self.cpu_ring.set_value(cpu)
         self.ram_ring.set_value(get_ram_info()["percent"])
-        temperature = get_cpu_temp()
-        self.temp_value.setText(f"{temperature}°C" if temperature else "—°C")
-        battery = get_battery_info()
-        if battery["percent"] is None:
-            self.battery_value.setText("▱  Недоступен")
-            self.battery_note.setText("Аккумулятор не обнаружен")
+
+        if self._gpu_available is None:
+            self._gpu_available = get_gpu_temp() is not None
+
+        temp = get_cpu_temp()
+        if self._gpu_available:
+            gpu_t = get_gpu_temp()
+            self.cpu_col_label.setText("ЦП | GPU")
+            if gpu_t is not None:
+                self.temp_value.setText(f"{gpu_t}°C")
+            else:
+                self.temp_value.setText(f"{temp}°C" if temp else "—°C")
         else:
-            icon = "▰" if battery["plugged"] else "▱"
-            self.battery_value.setText(f"{icon}  {battery['percent']}%")
-            self.battery_note.setText("Питание подключено" if battery["plugged"] else "Питание от аккумулятора")
+            self.cpu_col_label.setText("ЦП")
+            self.temp_value.setText(f"{temp}°C" if temp else "—°C")
+
+        bat = get_battery_info()
+        if bat["percent"] is None:
+            self.battery_pct.setText("—")
+            self.battery_status_lbl.setText("Батарея не обнаружена")
+            self.opt_badge.hide()
+        else:
+            self.battery_pct.setText(f"{bat['percent']}%")
+            if bat["plugged"]:
+                self.battery_status_lbl.setText("Подключено к сети")
+            else:
+                self.battery_status_lbl.setText("Работа от батареи")
+            
+            # Показываем бейдж если порог 80%
+            from core.config import load_config
+            cfg = load_config()
+            if cfg.get("charge_limit") == 80:
+                self.opt_badge.show()
+            else:
+                self.opt_badge.hide()

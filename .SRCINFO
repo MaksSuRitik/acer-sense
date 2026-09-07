@@ -1,0 +1,25 @@
+pkgbase = acer-sense-git
+	pkgdesc = Linux alternative for AcerSense (Fan control, Battery limit, Profiles, Hyprland)
+	pkgver = r3.000000
+	pkgrel = 1
+	url = https://github.com/MaksSuRitik/acer-sense
+	arch = any
+	license = GPL-3.0-or-later
+	makedepends = git
+	depends = python-pyqt6
+	depends = python-psutil
+	depends = polkit
+	depends = power-profiles-daemon
+	depends = alsa-tools
+	depends = smartmontools
+	depends = dbus
+	optdepends = hyprsunset: BluelightShield на Hyprland
+	optdepends = wlsunset: BluelightShield на других Wayland-compositor
+	optdepends = hyprland: интеграция горячих клавиш (XF86Launch6 → mic)
+	optdepends = wireplumber: wpctl для переключения микрофона
+	provides = acer-sense
+	conflicts = acer-sense
+	source = git+https://github.com/MaksSuRitik/acer-sense.git
+	sha256sums = SKIP
+
+pkgname = acer-sense-git
