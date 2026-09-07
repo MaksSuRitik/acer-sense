@@ -7,11 +7,13 @@ from PyQt6.QtGui import QIcon
 from ui.main_window import MainWindow
 from core.config import load_config
 from core.ec_control import apply_saved_charge_limit
+from core.hyprland import detect_hyprland, has_keybinds, install_keybinds
+
 
 def main():
     app = QApplication(sys.argv)
 
-    # Відновлюємо BluelightShield при запуску, якщо він був увімкнений
+    # Восстановление фильтра BluelightShield при запуске
     config = load_config()
     if config.get("bluelight_enabled", False):
         import subprocess, shutil
@@ -19,6 +21,10 @@ def main():
         tool = "hyprsunset" if shutil.which("hyprsunset") else "wlsunset" if shutil.which("wlsunset") else None
         if tool:
             subprocess.Popen([tool, "-t", str(temp)])
+
+    # Автономная интеграция с Hyprland: если бинды ещё не прописаны, добавляем их автоматически
+    if detect_hyprland() and not has_keybinds():
+        install_keybinds()
 
     icon_path = os.path.join(os.path.dirname(__file__), '../assets/icon.png')
     if os.path.exists(icon_path):
@@ -29,6 +35,7 @@ def main():
     # The helper uses polkit and therefore runs after a visible application window exists.
     QTimer.singleShot(0, apply_saved_charge_limit)
     sys.exit(app.exec())
+
 
 if __name__ == "__main__":
     main()

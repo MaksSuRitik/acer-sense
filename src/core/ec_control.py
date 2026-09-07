@@ -9,16 +9,30 @@ def _helper_path() -> str:
 
 
 def set_charge_limit(limit: int, persist: bool = True) -> bool:
-    """Apply a supported limit through polkit and persist only a successful change."""
+    """Apply a supported limit through polkit and persist setting."""
     if limit not in (80, 100):
         return False
+    
+    config = load_config()
+    custom_offset = config.get("ec_charge_offset")
+    custom_byte_80 = config.get("ec_charge_byte_80", "80")
+    custom_byte_100 = config.get("ec_charge_byte_100", "00")
+
+    arg = str(limit)
+    if custom_offset is not None:
+        b = custom_byte_80 if limit == 80 else custom_byte_100
+        arg = f"raw:{custom_offset}:{b}"
+
+    success = False
     try:
-        subprocess.run(["pkexec", _helper_path(), str(limit)], check=True, timeout=30)
-        if persist:
-            save_config({"charge_limit": limit})
-        return True
+        r = subprocess.run(["pkexec", _helper_path(), arg], capture_output=True, timeout=15, check=False)
+        success = (r.returncode == 0)
     except (OSError, subprocess.SubprocessError):
-        return False
+        success = False
+
+    if persist:
+        save_config({"charge_limit": limit})
+    return success
 
 
 def apply_saved_charge_limit() -> bool:
@@ -28,33 +42,27 @@ def apply_saved_charge_limit() -> bool:
 
 
 def set_usb_charging(enabled: bool, persist: bool = True) -> bool:
-    """Enable/disable USB charging when the laptop is powered off.
-
-    Записывает в EC-регистр 0xEF (смещение 239):
-      0x01 — включено, 0x00 — отключено.
-    Это смещение типично для платформ Acer AN5x5/Swift; на других моделях
-    может отличаться — функция возвращает False, не прерывая работу.
-    """
+    """Enable/disable USB charging when laptop is powered off."""
     byte_val = "01" if enabled else "00"
     ec_path = "/sys/kernel/debug/ec/ec0/io"
     if not os.path.exists(ec_path):
         return False
     try:
-        subprocess.run(
+        r = subprocess.run(
             ["pkexec", _helper_path(), f"usb:{byte_val}"],
-            check=True,
-            timeout=30,
+            capture_output=True,
+            timeout=15,
+            check=False,
         )
         if persist:
             save_config({"usb_charging": enabled})
-        return True
+        return r.returncode == 0
     except (OSError, subprocess.SubprocessError):
-        # Неподдерживаемая команда — не аварийно
         return False
 
 
 def get_charge_limit_from_sysfs() -> int | None:
-    """Read the current charge threshold from sysfs (kernel ≥ 5.4 with ACPI driver)."""
+    """Read current charge threshold from sysfs if driver supports it."""
     import pathlib
     for bat in sorted(pathlib.Path("/sys/class/power_supply").glob("BAT*")):
         threshold_file = bat / "charge_control_end_threshold"

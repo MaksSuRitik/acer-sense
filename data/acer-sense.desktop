@@ -1,9 +1,9 @@
-#!/usr/bin/env xdg-open
 [Desktop Entry]
 Name=Acer Sense
-Comment=Control center for Acer laptops
+Comment=Control center for Acer laptops (Fan control, Battery limit, Profiles)
 Exec=/usr/bin/acer-sense
-Icon=computer
+Icon=acer-sense
 Terminal=false
 Type=Application
 Categories=System;Settings;HardwareSettings;
+Keywords=acer;sense;fan;battery;power;

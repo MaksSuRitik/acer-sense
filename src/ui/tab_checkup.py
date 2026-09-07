@@ -137,7 +137,7 @@ class CheckupTab(QWidget):
 
         content = QWidget()
         outer = QHBoxLayout(content)
-        outer.setContentsMargins(90, 22, 90, 36)
+        outer.setContentsMargins(20, 16, 20, 24)
         outer.setSpacing(18)
 
         main_column = QVBoxLayout()

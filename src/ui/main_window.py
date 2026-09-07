@@ -116,8 +116,8 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Acer Sense")
-        self.resize(1280, 760)
-        self.setMinimumSize(960, 620)
+        self.resize(1180, 720)
+        self.setMinimumSize(800, 500)
         self.setStyleSheet(f"""
             QMainWindow, QWidget {{
                 background: {BG_MAIN};

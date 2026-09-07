@@ -3,8 +3,8 @@
 Supports Hyprland 0.55+ Lua configs (dms/binds-user.lua, hyprland.lua)
 and standard hyprland.conf configs.
 Binds:
-  - XF86Launch6 -> Microphone toggle + LED sync
   - XF86Reload  -> Cycle power profile (Fn+F)
+  - XF86Launch6 -> Microphone toggle + LED sync
 """
 from __future__ import annotations
 
@@ -29,34 +29,23 @@ def detect_hyprland() -> bool:
     return False
 
 
-def _get_target_config() -> Path:
+def _get_candidate_configs() -> list[Path]:
     home = Path.home()
-    candidates = [
+    return [
         home / ".config" / "hypr" / "dms" / "binds-user.lua",
         home / ".config" / "hypr" / "hyprland.lua",
         home / ".config" / "caelestia" / "hypr-user.lua",
         home / ".config" / "hypr" / "hyprland.conf",
     ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return candidates[-1]
 
 
 def has_keybinds() -> bool:
-    """Check if XF86Reload is configured in any Hyprland config file."""
-    home = Path.home()
-    candidates = [
-        home / ".config" / "hypr" / "dms" / "binds-user.lua",
-        home / ".config" / "hypr" / "hyprland.lua",
-        home / ".config" / "caelestia" / "hypr-user.lua",
-        home / ".config" / "hypr" / "hyprland.conf",
-    ]
-    for cfg in candidates:
+    """Check if both XF86Reload and XF86Launch6 are configured."""
+    for cfg in _get_candidate_configs():
         if cfg.exists():
             try:
                 content = cfg.read_text(encoding="utf-8")
-                if "XF86Reload" in content:
+                if "XF86Reload" in content and "XF86Launch6" in content:
                     return True
             except OSError:
                 pass
@@ -87,15 +76,8 @@ def install_mic_keybind() -> bool:
 
 def remove_keybinds() -> bool:
     """Remove Acer Sense section from Hyprland configs."""
-    home = Path.home()
-    candidates = [
-        home / ".config" / "hypr" / "dms" / "binds-user.lua",
-        home / ".config" / "hypr" / "hyprland.lua",
-        home / ".config" / "caelestia" / "hypr-user.lua",
-        home / ".config" / "hypr" / "hyprland.conf",
-    ]
     changed = False
-    for cfg in candidates:
+    for cfg in _get_candidate_configs():
         if not cfg.exists():
             continue
         try:
