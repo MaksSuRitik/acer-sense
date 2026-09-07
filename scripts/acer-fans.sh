@@ -42,6 +42,7 @@ apply_fan_profile() {
 # Применить профиль при запуске
 INITIAL_PROFILE="$(powerprofilesctl get 2>/dev/null || echo balanced)"
 apply_fan_profile "$INITIAL_PROFILE"
+LAST_APPLIED="$INITIAL_PROFILE"
 
 # Слушать изменения профиля через D-Bus без буферизации
 exec stdbuf -oL dbus-monitor --system \
@@ -50,5 +51,8 @@ exec stdbuf -oL dbus-monitor --system \
     | while IFS= read -r _line; do
         sleep 0.15
         NEW_PROFILE="$(powerprofilesctl get 2>/dev/null || echo balanced)"
-        apply_fan_profile "$NEW_PROFILE"
+        if [ "$NEW_PROFILE" != "$LAST_APPLIED" ]; then
+            apply_fan_profile "$NEW_PROFILE"
+            LAST_APPLIED="$NEW_PROFILE"
+        fi
     done

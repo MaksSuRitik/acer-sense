@@ -106,7 +106,12 @@ if [ -f "$HYPR_CONF" ]; then
     installed=1
 fi
 
+if [ -d "${USER_HOME}/.config/hypr" ] && [ -x /usr/lib/acer-sense/scripts/acer-fans.sh ]; then
+    ln -sf /usr/lib/acer-sense/scripts/acer-fans.sh "${USER_HOME}/.config/hypr/acer-fans.sh" 2>/dev/null || true
+fi
+
 if command -v hyprctl >/dev/null 2>&1; then
     hyprctl reload >/dev/null 2>&1 || true
     echo "hyprland-setup: reloaded Hyprland configuration."
 fi
+
