@@ -4,7 +4,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel,
                               QPushButton, QRadioButton, QScrollArea, QSlider,
                               QVBoxLayout, QWidget)
@@ -27,6 +27,7 @@ class SettingsTab(QWidget):
         self._cards: list[QFrame] = []
         self._radio_frames: list[tuple[QFrame, QRadioButton, QLabel]] = []
         self._section_icons: list[tuple[QLabel, str]] = []
+        self._power_radios: dict[str, QRadioButton] = {}
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 20)
@@ -63,6 +64,10 @@ class SettingsTab(QWidget):
 
         self.apply_theme(theme_manager.palette)
         theme_manager.theme_changed.connect(self.apply_theme)
+
+        self.sync_timer = QTimer(self)
+        self.sync_timer.timeout.connect(self._sync_realtime_settings)
+        self.sync_timer.start(2000)
 
     # ── Sidebar navigation ─────────────────────────────────────────────────
 
@@ -199,6 +204,7 @@ class SettingsTab(QWidget):
                 current == profile,
                 lambda _, v=profile: set_power_profile(v),
             )
+            self._power_radios[profile] = radio
             group.addButton(radio)
         return card
 
@@ -213,22 +219,22 @@ class SettingsTab(QWidget):
         group = QButtonGroup(card)
         limit = self.config.get("charge_limit", 100)
 
-        radio_80 = self._radio_option(
+        self._radio_80 = self._radio_option(
             card,
             "Оптимизированная зарядка аккум.",
             "(Рекомендуется) Для продления срока службы аккумулятора он будет заряжен только до 80% емкости.",
             limit == 80,
             lambda: self._set_charge_limit(80),
         )
-        radio_100 = self._radio_option(
+        self._radio_100 = self._radio_option(
             card,
             "Зарядка аккум. до полной емкости",
             "Зарядка до максимальной емкости для более долгого использования в мобильном режиме.",
             limit != 80,
             lambda: self._set_charge_limit(100),
         )
-        group.addButton(radio_80)
-        group.addButton(radio_100)
+        group.addButton(self._radio_80)
+        group.addButton(self._radio_100)
 
         self.btn_details = QPushButton("См. дополнительную информацию о состоянии аккумулятора >")
         self.btn_details.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -650,3 +656,31 @@ class SettingsTab(QWidget):
             QMessageBox.information(self, "Hyprland", "Конфигурация перезагружена.")
         else:
             QMessageBox.warning(self, "Hyprland", "Не удалось выполнить hyprctl reload.")
+
+    def _sync_realtime_settings(self):
+        # 1. Real-time Power Profile radio synchronization
+        current = get_power_profile()
+        if current in self._power_radios:
+            radio = self._power_radios[current]
+            if not radio.isChecked():
+                radio.blockSignals(True)
+                radio.setChecked(True)
+                radio.blockSignals(False)
+
+        # 2. Real-time Battery Limit radio synchronization
+        try:
+            from core.config import load_config
+            cfg = load_config()
+            limit = cfg.get("charge_limit", 100)
+            if hasattr(self, "_radio_80") and hasattr(self, "_radio_100"):
+                if limit == 80 and not self._radio_80.isChecked():
+                    self._radio_80.blockSignals(True)
+                    self._radio_80.setChecked(True)
+                    self._radio_80.blockSignals(False)
+                elif limit != 80 and not self._radio_100.isChecked():
+                    self._radio_100.blockSignals(True)
+                    self._radio_100.setChecked(True)
+                    self._radio_100.blockSignals(False)
+        except Exception:
+            pass
+

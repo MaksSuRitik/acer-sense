@@ -12,19 +12,53 @@ import psutil
 
 # ---------------------------------------------------------------------------
 # CPU
-# ---------------------------------------------------------------------------
+# Initialize non-blocking cpu_percent counter
+try:
+    psutil.cpu_percent(interval=None)
+except Exception:
+    pass
+
 
 def get_cpu_usage() -> float:
-    return psutil.cpu_percent(interval=0.1)
+    return psutil.cpu_percent(interval=None)
+
+
+def get_cpu_freq_info() -> dict:
+    try:
+        freq = psutil.cpu_freq()
+        if freq and freq.current:
+            return {
+                "current_ghz": round(freq.current / 1000, 2),
+                "min_ghz": round(freq.min / 1000, 2) if freq.min else None,
+                "max_ghz": round(freq.max / 1000, 2) if freq.max else None,
+            }
+    except Exception:
+        pass
+    return {"current_ghz": 0.0, "min_ghz": None, "max_ghz": None}
 
 
 def get_ram_info() -> dict:
     mem = psutil.virtual_memory()
+    try:
+        swap = psutil.swap_memory()
+        swap_used = round(swap.used / (1024**3), 1)
+        swap_total = round(swap.total / (1024**3), 1)
+        swap_percent = swap.percent
+    except Exception:
+        swap_used, swap_total, swap_percent = 0.0, 0.0, 0.0
+
     return {
         "percent": mem.percent,
         "total_gb": round(mem.total / (1024**3), 1),
         "used_gb": round(mem.used / (1024**3), 1),
+        "available_gb": round(mem.available / (1024**3), 1),
+        "free_gb": round(mem.free / (1024**3), 1),
+        "cached_gb": round(getattr(mem, "cached", 0) / (1024**3), 1),
+        "swap_used_gb": swap_used,
+        "swap_total_gb": swap_total,
+        "swap_percent": swap_percent,
     }
+
 
 
 def get_cpu_temp() -> int:
@@ -267,7 +301,25 @@ def get_battery_info() -> dict:
             design = _read_int(battery_path / design_name)
             if current and design and design > 0:
                 health_percent = round(current * 100 / design)
-                break
+        # Live voltage and wattage metrics
+        raw_v = _read_int(battery_path / "voltage_now")
+        if raw_v and raw_v > 0:
+            voltage_v = round(raw_v / 1_000_000, 2)
+        else:
+            voltage_v = None
+
+        raw_p = _read_int(battery_path / "power_now")
+        if raw_p and raw_p > 0:
+            power_w = round(raw_p / 1_000_000, 1)
+        else:
+            raw_c = _read_int(battery_path / "current_now")
+            if raw_c and raw_v and raw_c > 0:
+                power_w = round((raw_c * raw_v) / 1_000_000_000_000, 1)
+            else:
+                power_w = 0.0
+    else:
+        voltage_v = None
+        power_w = None
 
     return {
         "present": battery_path is not None or bat is not None,
@@ -277,4 +329,7 @@ def get_battery_info() -> dict:
         "cycles": cycles,
         "health_percent": health_percent,
         "temperature": temperature,
+        "voltage_v": voltage_v,
+        "power_w": power_w,
     }
+

@@ -7,8 +7,8 @@ from PyQt6.QtWidgets import (QButtonGroup, QFrame, QGridLayout, QHBoxLayout,
                               QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
 from core.power import get_power_profile, set_power_profile
-from core.sensors import (get_battery_info, get_cpu_temp, get_cpu_usage,
-                           get_gpu_temp, get_ram_info)
+from core.sensors import (get_battery_info, get_cpu_freq_info, get_cpu_temp,
+                           get_cpu_usage, get_gpu_temp, get_ram_info)
 from ui.details_dialogs import BatteryInfoDialog
 from ui.icons import render_svg_pixmap
 from ui.theme import ThemePalette, theme_manager
@@ -208,6 +208,7 @@ class HomeTab(QWidget):
         self.profile_group = QButtonGroup(self)
         self._profile_buttons: dict[str, ProfileButton] = {}
         curr_profile = get_power_profile()
+        self._current_active_profile = curr_profile
 
         for mode, icon_name, label, sub in _PROFILE_MODES:
             btn = ProfileButton(mode, icon_name, label, sub)
@@ -264,35 +265,61 @@ class HomeTab(QWidget):
 
     # ── Stats card ─────────────────────────────────────────────────────────
 
+    # ── Stats card ─────────────────────────────────────────────────────────
+
     def _make_stats_card(self) -> QFrame:
         card = QFrame()
         lo = QVBoxLayout(card)
         lo.setContentsMargins(16, 14, 16, 16)
-        lo.setSpacing(12)
+        lo.setSpacing(10)
 
         self.stats_title = QLabel("Обзор рабочих параметров")
         lo.addWidget(self.stats_title)
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(6)
-
-        self.ram_ring = RingProgress(58)
-        self.cpu_ring = RingProgress(58)
-        grid.addWidget(self.ram_ring, 1, 0, Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.cpu_ring, 1, 1, Qt.AlignmentFlag.AlignCenter)
-
-        self.cpu_temp_cell = TempCell("ЦП")
-        self.gpu_temp_cell = TempCell("GPU")
-        grid.addWidget(self.cpu_temp_cell, 1, 2, Qt.AlignmentFlag.AlignCenter)
-        grid.addWidget(self.gpu_temp_cell, 1, 3, Qt.AlignmentFlag.AlignCenter)
+        grid.setVerticalSpacing(4)
 
         self.ram_label = QLabel("ОЗУ")
         self.cpu_label = QLabel("ЦП")
-        self.ram_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.cpu_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cpu_temp_header = QLabel("Пакет ЦП")
+        self.gpu_temp_header = QLabel("Графика")
+        for lbl in (self.ram_label, self.cpu_label, self.cpu_temp_header, self.gpu_temp_header):
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         grid.addWidget(self.ram_label, 0, 0)
         grid.addWidget(self.cpu_label, 0, 1)
+        grid.addWidget(self.cpu_temp_header, 0, 2)
+        grid.addWidget(self.gpu_temp_header, 0, 3)
+
+        self.ram_ring = RingProgress(58)
+        self.cpu_ring = RingProgress(58)
+        self.cpu_temp_cell = TempCell("ЦП")
+        self.gpu_temp_cell = TempCell("GPU")
+        grid.addWidget(self.ram_ring, 1, 0, Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(self.cpu_ring, 1, 1, Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(self.cpu_temp_cell, 1, 2, Qt.AlignmentFlag.AlignCenter)
+        grid.addWidget(self.gpu_temp_cell, 1, 3, Qt.AlignmentFlag.AlignCenter)
+
+        self.ram_used_lbl = QLabel("— / — ГБ")
+        self.cpu_freq_lbl = QLabel("— ГГц")
+        self.cpu_cores_lbl = QLabel("Ядра ЦП")
+        self.gpu_status_sub = QLabel("RTX 2050")
+        for lbl in (self.ram_used_lbl, self.cpu_freq_lbl, self.cpu_cores_lbl, self.gpu_status_sub):
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        grid.addWidget(self.ram_used_lbl, 2, 0)
+        grid.addWidget(self.cpu_freq_lbl, 2, 1)
+        grid.addWidget(self.cpu_cores_lbl, 2, 2)
+        grid.addWidget(self.gpu_status_sub, 2, 3)
+
+        self.ram_free_lbl = QLabel("Свободно: —")
+        self.cpu_load_sub = QLabel("Загрузка ядер")
+        for lbl in (self.ram_free_lbl, self.cpu_load_sub):
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        grid.addWidget(self.ram_free_lbl, 3, 0)
+        grid.addWidget(self.cpu_load_sub, 3, 1)
 
         lo.addLayout(grid)
         return card
@@ -311,10 +338,10 @@ class HomeTab(QWidget):
         bat_row = QHBoxLayout()
         self.battery_pct = QLabel("—%")
         self.battery_status_lbl = QLabel("")
+        self.battery_status_lbl.setWordWrap(True)
         bat_row.addWidget(self.battery_pct)
-        bat_row.addSpacing(8)
-        bat_row.addWidget(self.battery_status_lbl)
-        bat_row.addStretch()
+        bat_row.addSpacing(10)
+        bat_row.addWidget(self.battery_status_lbl, 1)
         lo.addLayout(bat_row)
 
         self.opt_badge = QFrame()
@@ -356,7 +383,7 @@ class HomeTab(QWidget):
         self.mode_hint.setStyleSheet(f"font-size: 11px; color: {pal.text_secondary}; line-height: 1.4; border: 0; background: transparent;")
 
         self.battery_pct.setStyleSheet(f"font-size: 28px; font-weight: 700; color: {pal.accent}; border: 0; background: transparent;")
-        self.battery_status_lbl.setStyleSheet(f"font-size: 11px; color: {pal.text_muted}; border: 0; background: transparent; padding-top: 6px;")
+        self.battery_status_lbl.setStyleSheet(f"font-size: 11px; color: {pal.text_secondary}; border: 0; background: transparent; padding-top: 4px;")
 
         self.opt_badge.setStyleSheet(
             f"background: {pal.accent_subtle}; border: 1px solid {pal.badge_border}; border-radius: 8px;"
@@ -371,9 +398,22 @@ class HomeTab(QWidget):
             QPushButton:hover {{ color: {pal.accent_dark}; text-decoration: underline; }}
         """)
 
-        lbl_style = f"font-size: 10px; font-weight: 600; color: {pal.text_muted}; border: 0; background: transparent;"
-        self.ram_label.setStyleSheet(lbl_style)
-        self.cpu_label.setStyleSheet(lbl_style)
+        hdr_style = f"font-size: 10px; font-weight: 600; color: {pal.text_muted}; border: 0; background: transparent;"
+        val_style = f"font-size: 10px; font-weight: 700; color: {pal.text_primary}; border: 0; background: transparent;"
+        sub_style = f"font-size: 9px; font-weight: 500; color: {pal.text_muted}; border: 0; background: transparent;"
+
+        self.ram_label.setStyleSheet(hdr_style)
+        self.cpu_label.setStyleSheet(hdr_style)
+        self.cpu_temp_header.setStyleSheet(hdr_style)
+        self.gpu_temp_header.setStyleSheet(hdr_style)
+
+        self.ram_used_lbl.setStyleSheet(val_style)
+        self.cpu_freq_lbl.setStyleSheet(val_style)
+        self.cpu_cores_lbl.setStyleSheet(sub_style)
+        self.gpu_status_sub.setStyleSheet(sub_style)
+
+        self.ram_free_lbl.setStyleSheet(sub_style)
+        self.cpu_load_sub.setStyleSheet(sub_style)
 
         self.cpu_temp_cell.apply_theme(pal)
         self.gpu_temp_cell.apply_theme(pal)
@@ -390,27 +430,52 @@ class HomeTab(QWidget):
 
     def _on_profile_clicked(self, mode: str):
         set_power_profile(mode)
+        self._current_active_profile = mode
         self.mode_hint.setText(_PROFILE_HINTS.get(mode, ""))
 
     def update_stats(self):
+        # 1. Real-time Power Profile sync (e.g. from Fn+F or external tools)
+        current_p = get_power_profile()
+        if current_p != self._current_active_profile:
+            self._current_active_profile = current_p
+            if current_p in self._profile_buttons:
+                self._profile_buttons[current_p].setChecked(True)
+            self.mode_hint.setText(_PROFILE_HINTS.get(current_p, ""))
+
+        # 2. Real-time CPU Usage & Frequency
         cpu = get_cpu_usage()
         self.cpu_ring.set_value(cpu)
-        self.ram_ring.set_value(get_ram_info()["percent"])
+        freq_info = get_cpu_freq_info()
+        if freq_info.get("current_ghz"):
+            self.cpu_freq_lbl.setText(f"{freq_info['current_ghz']} ГГц")
+        else:
+            self.cpu_freq_lbl.setText("— ГГц")
 
-        # CPU temperature
+        # 3. Real-time RAM consumption
+        ram = get_ram_info()
+        self.ram_ring.set_value(ram["percent"])
+        self.ram_used_lbl.setText(f"{ram['used_gb']} / {ram['total_gb']} ГБ")
+        self.ram_free_lbl.setText(f"Свободно: {ram['available_gb']} ГБ")
+
+        # 4. Real-time CPU temperature
         cpu_t = get_cpu_temp()
         self.cpu_temp_cell.set_value(cpu_t if cpu_t else None)
 
-        # GPU temperature
+        # 5. Real-time GPU temperature
         if self._gpu_available is None:
             self._gpu_available = get_gpu_temp() is not None
         if self._gpu_available:
             gpu_t = get_gpu_temp()
             self.gpu_temp_cell.set_value(gpu_t)
+            if gpu_t is not None:
+                self.gpu_status_sub.setText("RTX 2050 (Активен)")
+            else:
+                self.gpu_status_sub.setText("RTX 2050 (Сон)")
         else:
             self.gpu_temp_cell.set_value(None)
+            self.gpu_status_sub.setText("Встроенная")
 
-        # Battery card
+        # 6. Real-time Battery metrics
         bat = get_battery_info()
         if bat["percent"] is None:
             self.battery_pct.setText("—")
@@ -418,12 +483,23 @@ class HomeTab(QWidget):
             self.opt_badge.hide()
         else:
             self.battery_pct.setText(f"{bat['percent']}%")
-            self.battery_status_lbl.setText(
-                "Подключено к сети" if bat["plugged"] else "Работа от батареи"
-            )
+            v_str = f"{bat['voltage_v']} В" if bat.get("voltage_v") else ""
+            p_str = f" • {bat['power_w']} Вт" if bat.get("power_w") and bat['power_w'] > 0 else ""
+            p_meta = f" ({v_str}{p_str})" if (v_str or p_str) else ""
+
+            if bat["plugged"]:
+                if bat.get("status") == "Full" or bat["percent"] >= 99:
+                    status_text = f"Подключено к сети (Полный заряд){p_meta}"
+                else:
+                    status_text = f"Зарядка от сети{p_meta}"
+            else:
+                status_text = f"Работа от аккумулятора{p_meta}"
+
+            self.battery_status_lbl.setText(status_text)
             from core.config import load_config
             cfg = load_config()
             if cfg.get("charge_limit") == 80:
                 self.opt_badge.show()
             else:
                 self.opt_badge.hide()
+

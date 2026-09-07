@@ -1,4 +1,4 @@
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFormLayout, QFrame,
                               QLabel, QScrollArea, QVBoxLayout, QWidget)
 
@@ -70,6 +70,7 @@ class DetailsDialog(QDialog):
         rows_layout.setContentsMargins(0, 4, 4, 8)
         rows_layout.setSpacing(6)
 
+        self._value_labels: dict[str, QLabel] = {}
         for key, value in rows:
             frame = QFrame()
             frame.setObjectName("row")
@@ -88,6 +89,7 @@ class DetailsDialog(QDialog):
             if "\n" in (value or ""):
                 key_label.setAlignment(Qt.AlignmentFlag.AlignTop)
 
+            self._value_labels[key] = value_label
             form.addRow(key_label, value_label)
             rows_layout.addWidget(frame)
 
@@ -108,18 +110,33 @@ class SystemInfoDialog(DetailsDialog):
 
 class BatteryInfoDialog(DetailsDialog):
     def __init__(self, parent=None):
+        super().__init__("Сведения об аккумуляторе", self._get_rows(), parent)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self._refresh_battery)
+        self.timer.start(1500)
+
+    def _get_rows(self) -> list[tuple[str, str]]:
         info = get_battery_info()
         health = f"{info['health_percent']}%" if info.get("health_percent") else "Недоступно"
         cycles = str(info["cycles"]) if info.get("cycles") is not None else "Недоступно"
-        temp = f"{info['temperature']}°C" if info.get("temperature") is not None else "Недоступно"
+        temp = f"{info['temperature']}°C" if info.get("temperature") is not None else "Норма"
         status = "Подключено к сети (AC)" if info.get("plugged") else "Работа от аккумулятора"
+        voltage = f"{info['voltage_v']} В" if info.get("voltage_v") else "Недоступно"
+        power = f"{info['power_w']} Вт" if info.get("power_w") is not None and info['power_w'] > 0 else "0.0 Вт"
 
-        rows = [
+        return [
             ("Текущий уровень заряда", f"{info.get('percent', '—')}%"),
             ("Статус питания",        status),
+            ("Текущее напряжение",     voltage),
+            ("Мощность заряда/разряда", power),
             ("Остаточная ёмкость (Health)", health),
             ("Количество циклов заряда", cycles),
             ("Температура аккумулятора", temp),
             ("Статус контроллера",    info.get("status", "—")),
         ]
-        super().__init__("Сведения об аккумуляторе", rows, parent)
+
+    def _refresh_battery(self):
+        for k, v in self._get_rows():
+            if k in self._value_labels:
+                self._value_labels[k].setText(v)
+

@@ -6,14 +6,15 @@ import subprocess
 import threading
 import webbrowser
 
-from PyQt6.QtCore import QThread, Qt, pyqtSignal
+from PyQt6.QtCore import QThread, QTimer, Qt, pyqtSignal
 from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
                               QLabel, QMessageBox, QProgressBar, QPushButton,
                               QScrollArea, QTextEdit, QVBoxLayout, QWidget)
 
 from core.diagnostics import CRITICAL, GOOD, UNKNOWN, WARNING, run_deep_check
-from core.sensors import get_battery_info, get_ram_info
+from core.sensors import (get_battery_info, get_cpu_temp, get_gpu_temp,
+                           get_ram_info)
 from core.storage import get_physical_drives
 from core.trash import empty_trash, format_size, get_trash_stats
 from ui.details_dialogs import SystemInfoDialog
@@ -132,6 +133,15 @@ class CheckupTab(QWidget):
         self._icon_labels: list[tuple[QLabel, str]] = []
         self._all_progress_bars: list[QProgressBar] = []
 
+        # Real-time widget tracking
+        self._bat_bar: QFrame | None = None
+        self._bat_charge_val: QLabel | None = None
+        self._bat_temp_val: QLabel | None = None
+        self._drive_part_widgets: dict[str, dict[str, tuple[QFrame, QLabel]]] = {}
+        self._ram_bar: QFrame | None = None
+        self._ram_val_lbl: QLabel | None = None
+        self._sys_temp_lbl: QLabel | None = None
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -182,6 +192,11 @@ class CheckupTab(QWidget):
 
         self.apply_theme(theme_manager.palette)
         theme_manager.theme_changed.connect(self.apply_theme)
+
+        self.monitor_timer = QTimer(self)
+        self.monitor_timer.timeout.connect(self.update_realtime_metrics)
+        self.monitor_timer.start(2000)
+        self.update_realtime_metrics()
 
     # ── Header ──────────────────────────────────────────────────────────────
 
@@ -239,10 +254,7 @@ class CheckupTab(QWidget):
         self._all_card_frames.append(card)
         return card
 
-    def _colored_bar(self, percent: int) -> QFrame:
-        bar = QFrame()
-        bar.setFixedHeight(6)
-        bar.setObjectName("driveBar")
+    def _update_bar(self, bar: QFrame, percent: int):
         pal = theme_manager.palette
         filled = max(0.01, min(1.0, percent / 100))
         color = pal.accent if percent < 85 else ("#e6a020" if percent < 95 else "#e05252")
@@ -254,6 +266,12 @@ class CheckupTab(QWidget):
                     stop:{min(filled + 0.001, 1.0):.3f} {pal.progress_track}, stop:1 {pal.progress_track});
             }}
         """)
+
+    def _colored_bar(self, percent: int) -> QFrame:
+        bar = QFrame()
+        bar.setFixedHeight(6)
+        bar.setObjectName("driveBar")
+        self._update_bar(bar, percent)
         return bar
 
     def _add_card(self, target: QVBoxLayout, card_id: str, icon_name: str, title: str,
@@ -335,21 +353,30 @@ class CheckupTab(QWidget):
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(6)
 
-        def _row(label: str, value: str):
-            lbl = QLabel(label)
-            lbl.setObjectName("detailLabel")
-            dv.addWidget(lbl)
-            if charge is not None and "Заряд" in label:
-                dv.addWidget(self._colored_bar(charge))
-            val_lbl = QLabel(value)
-            val_lbl.setObjectName("detailValue")
-            dv.addWidget(val_lbl)
+        lbl = QLabel("Заряд аккумулятора")
+        lbl.setObjectName("detailLabel")
+        dv.addWidget(lbl)
+        self._bat_bar = self._colored_bar(charge if charge is not None else 0)
+        dv.addWidget(self._bat_bar)
 
-        _row("Заряд аккумулятора", f"{charge}%" if charge is not None else "Недоступен")
-        if temp is not None:
-            _row("Температура", f"{temp}°C")
+        self._bat_charge_val = QLabel(f"{charge}%" if charge is not None else "Недоступен")
+        self._bat_charge_val.setObjectName("detailValue")
+        dv.addWidget(self._bat_charge_val)
+
+        t_lbl = QLabel("Температура аккумулятора")
+        t_lbl.setObjectName("detailLabel")
+        dv.addWidget(t_lbl)
+        self._bat_temp_val = QLabel(f"{temp}°C" if temp is not None else "—")
+        self._bat_temp_val.setObjectName("detailValue")
+        dv.addWidget(self._bat_temp_val)
+
         if cycles is not None:
-            _row("Количество циклов", str(cycles))
+            c_lbl = QLabel("Количество циклов")
+            c_lbl.setObjectName("detailLabel")
+            dv.addWidget(c_lbl)
+            c_val = QLabel(str(cycles))
+            c_val.setObjectName("detailValue")
+            dv.addWidget(c_val)
 
         btn_card_details = QPushButton("Информация о состоянии аккумулятора >")
         btn_card_details.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -367,14 +394,18 @@ class CheckupTab(QWidget):
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(5)
 
+        self._drive_part_widgets[card_id] = {}
         for part in drive.get("partitions", []):
-            mount_lbl = QLabel(part["mount"])
+            mount = part["mount"]
+            mount_lbl = QLabel(mount)
             mount_lbl.setObjectName("detailLabel")
             dv.addWidget(mount_lbl)
-            dv.addWidget(self._colored_bar(int(part["percent"])))
-            info = QLabel(f"осталось {part['free_gb']} GB, всего {part['total_gb']} GB")
+            bar = self._colored_bar(int(part["percent"]))
+            dv.addWidget(bar)
+            info = QLabel(f"осталось {part['free_gb']} GB, всего {part['total_gb']} GB ({part['percent']}%)")
             info.setObjectName("detailValue")
             dv.addWidget(info)
+            self._drive_part_widgets[card_id][mount] = (bar, info)
         dv.addStretch(1)
 
         self._add_card(target, card_id, "ssd", drive["model"], detail, drive)
@@ -387,15 +418,16 @@ class CheckupTab(QWidget):
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(5)
 
-        ram_lbl = QLabel("Использование RAM")
+        ram_lbl = QLabel("Использование RAM (реальное время)")
         ram_lbl.setObjectName("detailLabel")
         dv.addWidget(ram_lbl)
-        dv.addWidget(self._colored_bar(int(memory["percent"])))
-        val_lbl = QLabel(f"{memory['percent']}%  ({memory['used_gb']} / {memory['total_gb']} ГБ)")
-        val_lbl.setObjectName("detailValue")
-        dv.addWidget(val_lbl)
+        self._ram_bar = self._colored_bar(int(memory["percent"]))
+        dv.addWidget(self._ram_bar)
+        self._ram_val_lbl = QLabel(f"{memory['percent']}%  ({memory['used_gb']} / {memory['total_gb']} ГБ)")
+        self._ram_val_lbl.setObjectName("detailValue")
+        dv.addWidget(self._ram_val_lbl)
 
-        note = QLabel("Глубокий 4-проходный стресс-тест ОЗУ (шаблоны битов, хеш-структуры, удержание ячеек).")
+        note = QLabel("Глубокий 5-проходный стресс-тест ОЗУ (шаблоны битов, хеш-структуры, удержание ячеек, ECC).")
         note.setWordWrap(True)
         note.setObjectName("detailValue")
         dv.addWidget(note)
@@ -409,6 +441,10 @@ class CheckupTab(QWidget):
         dv = QVBoxLayout(detail)
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(4)
+
+        self._sys_temp_lbl = QLabel("Мониторинг сенсоров: ЦП ...°C | GPU ...°C")
+        self._sys_temp_lbl.setObjectName("detailLabel")
+        dv.addWidget(self._sys_temp_lbl)
 
         note = QLabel(
             "Комплексный 45-секундный термотест под математической нагрузкой:\n"
@@ -704,3 +740,53 @@ class CheckupTab(QWidget):
         self.active_card_ids = []
         self.btn_check_all.setEnabled(True)
         self.btn_check_all.setText("Проверить все")
+
+    def update_realtime_metrics(self):
+        # Skip updating card overview gauges while deep check worker is running
+        if self.worker is not None and self.worker.isRunning():
+            return
+
+        # 1. Real-time RAM consumption
+        if self._ram_bar and self._ram_val_lbl:
+            mem = get_ram_info()
+            self._update_bar(self._ram_bar, int(mem["percent"]))
+            self._ram_val_lbl.setText(
+                f"{mem['percent']}%  ({mem['used_gb']} / {mem['total_gb']} ГБ • свободно {mem['available_gb']} ГБ)"
+            )
+
+        # 2. Real-time Drives partition usage
+        fresh_drives = get_physical_drives()
+        for d_idx, d_info in enumerate(fresh_drives):
+            cid = f"drive_{d_idx}"
+            if cid in self._drive_part_widgets:
+                for part in d_info.get("partitions", []):
+                    mount = part["mount"]
+                    if mount in self._drive_part_widgets[cid]:
+                        bar, lbl = self._drive_part_widgets[cid][mount]
+                        self._update_bar(bar, int(part["percent"]))
+                        lbl.setText(f"осталось {part['free_gb']} GB, всего {part['total_gb']} GB ({part['percent']}%)")
+
+        # 3. Real-time Battery state
+        bat = get_battery_info()
+        charge = bat.get("percent")
+        if charge is not None and self._bat_bar and self._bat_charge_val:
+            self._update_bar(self._bat_bar, charge)
+            v_str = f" • {bat['voltage_v']} В" if bat.get("voltage_v") else ""
+            p_str = f" • {bat['power_w']} Вт" if bat.get("power_w") and bat['power_w'] > 0 else ""
+            if bat.get("plugged"):
+                st = "Полный заряд" if (bat.get("status") == "Full" or charge >= 99) else "Зарядка"
+            else:
+                st = "Разрядка"
+            self._bat_charge_val.setText(f"{charge}% ({st}{v_str}{p_str})")
+
+        if self._bat_temp_val:
+            t = bat.get("temperature")
+            self._bat_temp_val.setText(f"{t}°C" if t is not None else "Норма")
+
+        # 4. Real-time System & Cooling sensors
+        if self._sys_temp_lbl:
+            c_temp = get_cpu_temp()
+            g_temp = get_gpu_temp()
+            g_str = f"{g_temp}°C" if g_temp is not None else "Сон"
+            self._sys_temp_lbl.setText(f"Мониторинг сенсоров: ЦП {c_temp}°C | GPU {g_str}")
+
