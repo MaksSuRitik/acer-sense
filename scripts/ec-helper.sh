@@ -39,6 +39,38 @@ case "${1:-}" in
             fi
         done
         ;;
+    auto-limit*|auto:*)
+        target="${2:-${1#*:}}"
+        target="${target:-80}"
+        # Determine battery capacity
+        cap=0
+        for bat in /sys/class/power_supply/BAT*; do
+            if [ -r "$bat/capacity" ]; then
+                cap=$(cat "$bat/capacity" 2>/dev/null || echo 0)
+                break
+            fi
+        done
+        if [ "$target" = "80" ]; then
+            if [ "$cap" -ge 80 ]; then
+                if [ -w "$ec_path" ]; then
+                    printf "\x80" | dd of="$ec_path" bs=1 seek=221 count=1 conv=notrunc status=none
+                fi
+                echo "applied:stop (cap $cap >= 80)"
+            elif [ "$cap" -le 78 ]; then
+                if [ -w "$ec_path" ]; then
+                    printf "\x00" | dd of="$ec_path" bs=1 seek=221 count=1 conv=notrunc status=none
+                fi
+                echo "applied:charge (cap $cap <= 78)"
+            else
+                echo "maintained:hysteresis (cap $cap)"
+            fi
+        else
+            if [ -w "$ec_path" ]; then
+                printf "\x00" | dd of="$ec_path" bs=1 seek=221 count=1 conv=notrunc status=none
+            fi
+            echo "applied:full (target 100)"
+        fi
+        ;;
     get)
         # Read current hardware limit from EC register 221 (0xDD)
         if [ -r "$ec_path" ]; then

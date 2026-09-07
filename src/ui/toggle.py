@@ -1,6 +1,8 @@
 from PyQt6.QtWidgets import QCheckBox
 from PyQt6.QtGui import QPainter, QColor, QPen, QBrush
 from PyQt6.QtCore import Qt, QPropertyAnimation, pyqtProperty
+from ui.theme import theme_manager
+
 
 class ToggleSwitch(QCheckBox):
     def __init__(self, parent=None):
@@ -30,25 +32,24 @@ class ToggleSwitch(QCheckBox):
         self.animation.start()
 
     def hitButton(self, position):
-        """QCheckBox normally accepts only its indicator; a switch is one control."""
         return self.rect().contains(position)
 
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pal = theme_manager.palette
 
-        # Колір фону
         if self.isChecked():
-            bg_color = QColor("#4CAF50") # Зелений Acer
+            bg_color = QColor(pal.accent)
         else:
-            bg_color = QColor("#e0e0e0") # Сірий
+            bg_color = QColor(pal.progress_track if pal.is_dark else "#d6e0db")
 
-        # Малюємо фон (капсулу)
+        # Background capsule
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(bg_color))
         painter.drawRoundedRect(0, 0, self.width(), self.height(), 13, 13)
 
-        # Малюємо білий кружечок
+        # White knob with subtle border
         painter.setBrush(QBrush(QColor("#ffffff")))
         painter.drawEllipse(int(self._position), 3, 20, 20)
         painter.end()
