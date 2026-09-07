@@ -1,0 +1,4 @@
+pkg/
+src/acer-sense/
+*.tar.zst
+acer-sense/

@@ -1,9 +1,9 @@
 pkgname=acer-sense-git
-pkgver=1.0.0.r0.g0000000
+pkgver=r2.486fa05
 pkgrel=1
 pkgdesc="Linux alternative for AcerSense (Fan control, Battery limit, Profiles)"
 arch=('any')
-url="https://github.com/ТВІЙ_ЮЗЕР/acer-sense"
+url="https://github.com/MaksSuRitik/acer-sense"
 license=('GPL-3.0-or-later')
 depends=('python-pyqt6' 'python-psutil' 'polkit' 'power-profiles-daemon' 'alsa-tools' 'smartmontools')
 makedepends=('git')
@@ -11,17 +11,18 @@ provides=('acer-sense')
 conflicts=('acer-sense')
 optdepends=('hyprsunset: for BluelightShield feature on Hyprland'
             'wlsunset: for BluelightShield feature on other Wayland compositors')
-source=("git+https://github.com/ТВІЙ_ЮЗЕР/acer-sense.git")
+source=("git+https://github.com/MaksSuRitik/acer-sense.git")
 sha256sums=('SKIP')
 
 pkgver() {
     cd "$srcdir/${pkgname%-git}"
-    git describe --long --tags 2>/dev/null | sed 's/^v//;s/-/.r/;s/-/./g' || \
-        printf '0.0.0.r%s.g%s\n' "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short=7 HEAD)"
 }
 
 package() {
     cd "$srcdir/${pkgname%-git}"
+
+    find src -type d -name "__pycache__" -exec rm -rf {} +
 
     install -dm755 "$pkgdir/usr/lib/acer-sense"
     install -dm755 "$pkgdir/usr/bin"
