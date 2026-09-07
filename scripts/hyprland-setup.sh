@@ -1,5 +1,5 @@
 #!/bin/bash
-# hyprland-setup.sh — Idempotent Hyprland keybind installer for Acer Sense
+# hyprland-setup.sh — Idempotent Hyprland keybind installer/uninstaller for Acer Sense
 # Configures:
 #   XF86Reload  -> Cycle power profiles (Fn+F)
 #   XF86Launch6 -> Microphone mute toggle + LED sync
@@ -17,6 +17,31 @@ SECTION_END="-- === /Acer Sense keybinds ==="
 
 CONF_SECTION_START="# === Acer Sense keybinds ==="
 CONF_SECTION_END="# === /Acer Sense keybinds ==="
+
+# Handle uninstall / remove mode
+if [ "${1:-}" = "remove" ] || [ "${1:-}" = "uninstall" ]; then
+    for target in "$LUA_DMS_BINDS" "$LUA_MAIN" "$CAELESTIA_LUA"; do
+        if [ -f "$target" ]; then
+            sed -i "/$SECTION_START/,/$SECTION_END/d" "$target" 2>/dev/null || true
+            sed -i '/hl\.unbind("XF86Launch6")/d' "$target" 2>/dev/null || true
+            sed -i '/hl\.bind("XF86Launch6",/d' "$target" 2>/dev/null || true
+            sed -i '/hl\.unbind("XF86Reload")/d' "$target" 2>/dev/null || true
+            sed -i '/hl\.bind("XF86Reload",/d' "$target" 2>/dev/null || true
+            echo "hyprland-setup: removed keybinds from $target"
+        fi
+    done
+    if [ -f "$HYPR_CONF" ]; then
+        sed -i "/$CONF_SECTION_START/,/$CONF_SECTION_END/d" "$HYPR_CONF" 2>/dev/null || true
+        sed -i '/XF86Reload.*power-cycle/d' "$HYPR_CONF" 2>/dev/null || true
+        sed -i '/XF86Launch6.*mic-sync/d' "$HYPR_CONF" 2>/dev/null || true
+        echo "hyprland-setup: removed keybinds from $HYPR_CONF"
+    fi
+    if command -v hyprctl >/dev/null 2>&1; then
+        hyprctl reload >/dev/null 2>&1 || true
+        echo "hyprland-setup: reloaded Hyprland configuration."
+    fi
+    exit 0
+fi
 
 read -r -d '' LUA_BLOCK << 'EOF' || true
 -- === Acer Sense keybinds ===

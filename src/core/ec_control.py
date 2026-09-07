@@ -35,6 +35,19 @@ def set_charge_limit(limit: int, persist: bool = True) -> bool:
     return success
 
 
+def get_charge_limit_from_ec() -> int | None:
+    """Read actual limit from EC register 221 (0xDD)."""
+    try:
+        r = subprocess.run(["pkexec", _helper_path(), "get"], capture_output=True, text=True, timeout=5, check=False)
+        if r.returncode == 0:
+            out = r.stdout.strip()
+            if out in ("80", "100"):
+                return int(out)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
 def apply_saved_charge_limit() -> bool:
     """Re-apply the last confirmed setting after application startup."""
     limit = load_config().get("charge_limit", 100)
@@ -44,9 +57,6 @@ def apply_saved_charge_limit() -> bool:
 def set_usb_charging(enabled: bool, persist: bool = True) -> bool:
     """Enable/disable USB charging when laptop is powered off."""
     byte_val = "01" if enabled else "00"
-    ec_path = "/sys/kernel/debug/ec/ec0/io"
-    if not os.path.exists(ec_path):
-        return False
     try:
         r = subprocess.run(
             ["pkexec", _helper_path(), f"usb:{byte_val}"],
