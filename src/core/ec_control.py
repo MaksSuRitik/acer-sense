@@ -4,8 +4,11 @@ from core.config import load_config, save_config
 
 
 def _helper_path() -> str:
+    installed = "/usr/lib/acer-sense/scripts/ec-helper.sh"
+    if os.path.exists(installed):
+        return installed
     dev_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../scripts/ec-helper.sh"))
-    return dev_path if os.path.exists(dev_path) else "/usr/lib/acer-sense/scripts/ec-helper.sh"
+    return dev_path
 
 
 def set_charge_limit(limit: int, persist: bool = True) -> bool:

@@ -19,6 +19,7 @@ makedepends=('git')
 provides=('acer-sense')
 conflicts=('acer-sense')
 optdepends=(
+    'acer-wmi-battery-dkms: управление лимитом зарядки аккумулятора 80%/100% через WMI'
     'hyprsunset: BluelightShield на Hyprland'
     'wlsunset: BluelightShield на других Wayland-композиторах'
     'hyprland: интеграция горячих клавиш (XF86Launch6 → микрофон, Fn+F → профили)'
