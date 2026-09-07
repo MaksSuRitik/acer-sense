@@ -1,6 +1,11 @@
+"""Hardware sensor readings: CPU, GPU, RAM, fans, battery."""
 from __future__ import annotations
 
+import shutil
+import subprocess
+import time
 from pathlib import Path
+from typing import Optional
 
 import psutil
 
@@ -23,19 +28,31 @@ def get_ram_info() -> dict:
 
 
 def get_cpu_temp() -> int:
-    readings = get_temperature_readings()
-    return int(max(readings.values())) if readings else 0
+    """Return CPU package temperature in °C (highest core), or 0 if unavailable."""
+    try:
+        temps = psutil.sensors_temperatures()
+        # Try coretemp first (Intel), then k10temp (AMD), then acpitz as last resort
+        for chip in ("coretemp", "k10temp", "cpu_thermal"):
+            if chip in temps:
+                entries = [e for e in temps[chip] if e.current is not None]
+                if entries:
+                    return int(max(e.current for e in entries))
+        # Fallback: any thermal sensor
+        for entries in temps.values():
+            valid = [e for e in entries if e.current is not None and e.current < 150]
+            if valid:
+                return int(max(e.current for e in valid))
+    except Exception:
+        pass
+    return 0
 
 
 # ---------------------------------------------------------------------------
-# Temperature sensors
+# Temperature sensors (all)
 # ---------------------------------------------------------------------------
-
-# Ключи psutil → читаемые GPU-имена (проверяем первый совпавший)
-_GPU_CHIP_KEYS = {"amdgpu", "radeon", "nouveau", "nvidia", "nvme", "intel_gpu"}
 
 def get_temperature_readings() -> dict[str, float]:
-    """Return every available thermal reading, using stable human-readable keys."""
+    """Return every available thermal reading as {label: celsius}."""
     try:
         temps = psutil.sensors_temperatures()
         readings: dict[str, float] = {}
@@ -49,24 +66,71 @@ def get_temperature_readings() -> dict[str, float]:
         return {}
 
 
-def get_gpu_temp() -> int | None:
-    """Return GPU temperature in °C, or None if unavailable."""
-    try:
-        temps = psutil.sensors_temperatures()
-        for chip_key in _GPU_CHIP_KEYS:
-            if chip_key in temps:
-                entries = [e for e in temps[chip_key] if e.current is not None]
-                if entries:
-                    # Берём максимум, если несколько GPU-зон
-                    return int(max(e.current for e in entries))
-    except Exception:
-        pass
-    # Пробуем через hwmon напрямую (для некоторых карт)
-    return _hwmon_gpu_temp()
+# ---------------------------------------------------------------------------
+# GPU temperature  (NVIDIA RTX / AMD / Intel)
+# ---------------------------------------------------------------------------
+
+# Chips that indicate a GPU in psutil temperatures (not storage drives)
+_GPU_CHIP_KEYS = {"amdgpu", "radeon", "nouveau", "nvidia", "intel_gpu"}
+
+# Simple in-process cache so repeated UI calls don't fork nvidia-smi each time
+_gpu_temp_cache: tuple[float, Optional[int]] = (0.0, None)  # (timestamp, value)
+_GPU_CACHE_TTL = 2.0  # seconds
 
 
-def _hwmon_gpu_temp() -> int | None:
-    """Fallback: scan hwmon entries for GPU labels."""
+def get_gpu_temp() -> Optional[int]:
+    """Return discrete GPU temperature in °C, or None if unavailable.
+
+    Priority:
+    1. nvidia-smi (reliable for NVIDIA RTX/GTX, no driver issues)
+    2. psutil sensors_temperatures() — amdgpu / radeon
+    3. hwmon sysfs scan for known GPU driver names
+    """
+    global _gpu_temp_cache
+    now = time.monotonic()
+    if now - _gpu_temp_cache[0] < _GPU_CACHE_TTL and _gpu_temp_cache[1] is not None:
+        return _gpu_temp_cache[1]
+
+    temp: Optional[int] = None
+
+    # ── 1. nvidia-smi (fastest, most accurate for NVIDIA) ──────────────────
+    if shutil.which("nvidia-smi"):
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "--query-gpu=temperature.gpu",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=2, check=False,
+            )
+            if result.returncode == 0:
+                raw = result.stdout.strip().splitlines()[0].strip()
+                if raw.isdigit():
+                    temp = int(raw)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            pass
+
+    # ── 2. psutil sensors — AMD / fallback ─────────────────────────────────
+    if temp is None:
+        try:
+            temps = psutil.sensors_temperatures()
+            for chip_key in _GPU_CHIP_KEYS:
+                if chip_key in temps:
+                    entries = [e for e in temps[chip_key] if e.current is not None]
+                    if entries:
+                        temp = int(max(e.current for e in entries))
+                        break
+        except Exception:
+            pass
+
+    # ── 3. hwmon sysfs direct scan ─────────────────────────────────────────
+    if temp is None:
+        temp = _hwmon_gpu_temp()
+
+    _gpu_temp_cache = (now, temp)
+    return temp
+
+
+def _hwmon_gpu_temp() -> Optional[int]:
+    """Fallback: scan /sys/class/hwmon for GPU-related driver names."""
     hwmon_root = Path("/sys/class/hwmon")
     if not hwmon_root.exists():
         return None
@@ -78,7 +142,6 @@ def _hwmon_gpu_temp() -> int | None:
         except OSError:
             continue
         if any(g in hw_name for g in gpu_names):
-            # ищем temp1_input
             for temp_file in sorted(hwmon.glob("temp*_input")):
                 try:
                     val = int(temp_file.read_text(encoding="utf-8").strip())
@@ -110,32 +173,65 @@ def get_fan_speeds() -> list[dict]:
 # Battery
 # ---------------------------------------------------------------------------
 
-def _read_int(path: Path) -> int | None:
+def _read_int(path: Path) -> Optional[int]:
     try:
         return int(path.read_text(encoding="utf-8").strip())
     except (OSError, ValueError):
         return None
 
 
-def get_battery_temp() -> float | None:
-    """Read battery temperature from sysfs (in tenths of a degree → °C)."""
-    for bat_path in sorted(Path("/sys/class/power_supply").glob("BAT*")):
-        # Linux < 5.x: temp в 0.1 °C; некоторые драйверы — прямо °C
-        raw = _read_int(bat_path / "temp")
+def get_battery_temp() -> Optional[int]:
+    """Return battery temperature in °C from sysfs, or None."""
+    for bat in sorted(Path("/sys/class/power_supply").glob("BAT*")):
+        raw = _read_int(bat / "temp")
         if raw is not None:
-            # Если значение > 1000 — это millidegrees Celsius
-            if raw > 1000:
-                return round(raw / 10.0, 1)
-            elif raw > 200:
-                # tenths of °C
-                return round(raw / 10.0, 1)
-            else:
-                return float(raw)
+            return raw // 10  # tenths of degree → degrees
+    return None
+
+
+# Simple in-process cache for EC-based cycle count (expensive pkexec call)
+_cycles_cache: tuple[float, Optional[int]] = (0.0, None)
+_CYCLES_CACHE_TTL = 60.0  # seconds — EC cycles don't change during a session
+
+
+def _get_cycles_from_ec() -> Optional[int]:
+    """Read battery cycle count from EC registers via ec-helper.sh (pkexec).
+
+    EC dump analysis (offsets 0x90-0xDF):
+      - Cycle count NOT in this range (confirmed from 3-state dump analysis)
+      - Previously located at 0xF4-0xF5 in a wider RW-Everything dump
+      - 0xBD (189) = 0x6A = 106 is stable but doesn't match user's 160+ figure
+      - We try 0xF4-0xF5 first, fall back to sysfs
+    """
+    global _cycles_cache
+    now = time.monotonic()
+    if now - _cycles_cache[0] < _CYCLES_CACHE_TTL and _cycles_cache[1] is not None:
+        return _cycles_cache[1]
+
+    installed = "/usr/lib/acer-sense/scripts/ec-helper.sh"
+    if not Path(installed).exists():
+        return None
+
+    try:
+        result = subprocess.run(
+            ["pkexec", installed, "cycles"],
+            capture_output=True, text=True, timeout=8, check=False,
+        )
+        if result.returncode == 0:
+            raw = result.stdout.strip()
+            if raw.isdigit():
+                val = int(raw)
+                if 0 < val < 10000:
+                    _cycles_cache = (now, val)
+                    return val
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+
     return None
 
 
 def get_battery_info() -> dict:
-    """Return the portable, read-only battery data Linux exposes through sysfs."""
+    """Return battery state dict."""
     battery_paths = sorted(Path("/sys/class/power_supply").glob("BAT*"))
     battery_path = battery_paths[0] if battery_paths else None
 
@@ -147,8 +243,8 @@ def get_battery_info() -> dict:
     percent = round(bat.percent) if bat else _read_int(battery_path / "capacity") if battery_path else None
     plugged = bool(bat.power_plugged) if bat else False
     status = "Unknown"
-    cycles = None
-    health_percent = None
+    cycles: Optional[int] = None
+    health_percent: Optional[int] = None
     temperature = get_battery_temp()
 
     if battery_path:
@@ -156,9 +252,15 @@ def get_battery_info() -> dict:
             status = (battery_path / "status").read_text(encoding="utf-8").strip()
         except OSError:
             pass
-        cycles = _read_int(battery_path / "cycle_count")
 
-        # Kernels expose one of the energy_* or charge_* pairs depending on the driver.
+        # Try sysfs cycle_count first (fast, no auth)
+        sysfs_cycles = _read_int(battery_path / "cycle_count")
+        if sysfs_cycles and sysfs_cycles > 0:
+            cycles = sysfs_cycles
+        else:
+            # sysfs reports 0 — try EC registers (requires pkexec, cached)
+            cycles = _get_cycles_from_ec()
+
         for current_name, design_name in (("energy_full", "energy_full_design"),
                                           ("charge_full", "charge_full_design")):
             current = _read_int(battery_path / current_name)

@@ -1,9 +1,17 @@
+"""Settings tab — professional redesign.
+
+All radio options are wrapped in transparent card rows. No dark background strip.
+No emoji anywhere. Clean typography and consistent spacing.
+"""
+from __future__ import annotations
+
+import shutil
+import subprocess
+
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel,
                               QPushButton, QRadioButton, QScrollArea, QSlider,
                               QVBoxLayout, QWidget)
-import shutil
-import subprocess
 
 from core.config import load_config, save_config
 from core.ec_control import set_charge_limit
@@ -12,6 +20,33 @@ from ui.toggle import ToggleSwitch
 
 ACCENT      = "#388e6a"
 ACCENT_DARK = "#27684d"
+_RADIO_SS = f"""
+    QRadioButton {{
+        color: #2e3b35;
+        font-size: 12px;
+        font-weight: 600;
+        spacing: 8px;
+        background: transparent;
+    }}
+    QRadioButton:focus {{
+        outline: none;
+        background: transparent;
+    }}
+    QRadioButton::indicator {{
+        width: 16px;
+        height: 16px;
+        border: 1.5px solid #a8c8ba;
+        border-radius: 8px;
+        background: #ffffff;
+    }}
+    QRadioButton::indicator:checked {{
+        border: 4px solid {ACCENT};
+        background: #ffffff;
+    }}
+    QRadioButton::indicator:hover {{
+        border-color: {ACCENT};
+    }}
+"""
 
 
 class SettingsTab(QWidget):
@@ -52,11 +87,12 @@ class SettingsTab(QWidget):
         layout.addWidget(sidebar)
         layout.addWidget(self.scroll, 1)
 
-    # ── Боковая панель навигации ─────────────────────────────────────────────
+    # ── Sidebar navigation ─────────────────────────────────────────────────
 
     def _build_sidebar(self) -> QFrame:
         panel = QFrame()
-        panel.setFixedWidth(200)
+        panel.setFixedWidth(198)
+        panel.setObjectName("navPanel")
         panel.setStyleSheet("""
             QFrame#navPanel {
                 background: #ffffff;
@@ -64,33 +100,36 @@ class SettingsTab(QWidget):
                 border-radius: 16px;
             }
         """)
-        panel.setObjectName("navPanel")
-
         lo = QVBoxLayout(panel)
-        lo.setContentsMargins(14, 16, 14, 16)
-        lo.setSpacing(6)
+        lo.setContentsMargins(12, 14, 12, 14)
+        lo.setSpacing(4)
         lo.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         title = QLabel("Персональные настройки")
-        title.setStyleSheet("font-size: 13px; font-weight: 700; color: #2e3b35; margin-bottom: 8px;")
+        title.setStyleSheet(
+            "font-size: 12px; font-weight: 700; color: #2e3b35; margin-bottom: 6px; background: transparent;"
+        )
         lo.addWidget(title)
 
         self.nav_group = QButtonGroup(panel)
-        self.btn_nav_power   = self._nav_button("Режим использования системы")
-        self.btn_nav_battery = self._nav_button("Аккумулятор и зарядка")
-        self.btn_nav_screen  = self._nav_button("Экран (BluelightShield)")
-        self.btn_nav_hypr    = self._nav_button("Горячие клавиши (Hyprland)")
+        self.btn_nav_power   = self._nav_button("Режим использования")
+        self.btn_nav_battery = self._nav_button("Аккумулятор")
+        self.btn_nav_screen  = self._nav_button("Экран и защита зрения")
+        self.btn_nav_hypr    = self._nav_button("Горячие клавиши")
 
-        self.btn_nav_power.clicked.connect(lambda: self._show_section(self.power_card, self.btn_nav_power))
-        self.btn_nav_battery.clicked.connect(lambda: self._show_section(self.battery_card, self.btn_nav_battery))
-        self.btn_nav_screen.clicked.connect(lambda: self._show_section(self.screen_card, self.btn_nav_screen))
-        self.btn_nav_hypr.clicked.connect(lambda: self._show_section(self.hypr_card, self.btn_nav_hypr))
+        self.btn_nav_power.clicked.connect(
+            lambda: self._show_section(self.power_card, self.btn_nav_power))
+        self.btn_nav_battery.clicked.connect(
+            lambda: self._show_section(self.battery_card, self.btn_nav_battery))
+        self.btn_nav_screen.clicked.connect(
+            lambda: self._show_section(self.screen_card, self.btn_nav_screen))
+        self.btn_nav_hypr.clicked.connect(
+            lambda: self._show_section(self.hypr_card, self.btn_nav_hypr))
 
         self.btn_nav_power.setChecked(True)
-        lo.addWidget(self.btn_nav_power)
-        lo.addWidget(self.btn_nav_battery)
-        lo.addWidget(self.btn_nav_screen)
-        lo.addWidget(self.btn_nav_hypr)
+        for btn in (self.btn_nav_power, self.btn_nav_battery,
+                    self.btn_nav_screen, self.btn_nav_hypr):
+            lo.addWidget(btn)
         lo.addStretch(1)
         return panel
 
@@ -100,7 +139,7 @@ class SettingsTab(QWidget):
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(f"""
             QPushButton {{
-                border: 0; border-radius: 9px; padding: 10px 12px;
+                border: 0; border-radius: 8px; padding: 9px 10px;
                 text-align: left; font-size: 11px; font-weight: 500;
                 color: #55665f; background: transparent;
             }}
@@ -113,64 +152,81 @@ class SettingsTab(QWidget):
         self.nav_group.addButton(btn)
         return btn
 
-    # ── Шаблон карточки ─────────────────────────────────────────────────────
+    # ── Card template ──────────────────────────────────────────────────────
 
-    def _section_card(self, icon: str, title: str, subtitle: str = "") -> QFrame:
+    def _section_card(self, title: str, subtitle: str = "") -> QFrame:
         card = QFrame()
         card.setStyleSheet("""
             QFrame { background: #ffffff; border: 1px solid #dde7e2; border-radius: 16px; }
             QLabel { border: 0; background: transparent; }
         """)
         section = QVBoxLayout(card)
-        section.setContentsMargins(18, 16, 18, 16)
+        section.setContentsMargins(20, 16, 20, 16)
         section.setSpacing(10)
 
-        heading = QLabel(f"{icon}  {title}" if icon else title)
+        heading = QLabel(title)
         heading.setStyleSheet("font-size: 14px; color: #2e3b35; font-weight: 700;")
         rule = QFrame()
         rule.setFixedHeight(1)
-        rule.setStyleSheet("background: #d8e5df; border: 0; margin: 0 0 2px;")
+        rule.setStyleSheet("background: #d8e5df; border: 0; margin: 0;")
         section.addWidget(heading)
         section.addWidget(rule)
         if subtitle:
             intro = QLabel(subtitle)
             intro.setWordWrap(True)
-            intro.setStyleSheet("font-size: 11px; color: #6f7f78; margin-bottom: 2px;")
+            intro.setStyleSheet("font-size: 11px; color: #6f7f78;")
             section.addWidget(intro)
         return card
 
+    # ── Radio option — no dark strip ───────────────────────────────────────
+
     def _radio_option(self, parent: QFrame, title: str, description: str,
                       selected: bool, callback) -> QRadioButton:
+        """Each option is an isolated card row with transparent radio button."""
+        row_frame = QFrame()
+        row_frame.setStyleSheet(
+            "QFrame { background: #f8faf9; border: 1px solid #e5ede9;"
+            " border-radius: 10px; margin: 1px 0; } "
+            "QLabel { background: transparent; border: 0; }"
+        )
+        row_lo = QVBoxLayout(row_frame)
+        row_lo.setContentsMargins(12, 10, 12, 10)
+        row_lo.setSpacing(3)
+
         radio = QRadioButton(title)
         radio.setChecked(selected)
         radio.setCursor(Qt.CursorShape.PointingHandCursor)
-        radio.setStyleSheet(f"""
-            QRadioButton {{ color: #323d38; font-size: 12px; font-weight: 700; padding-top: 4px; }}
-            QRadioButton::indicator {{ width: 15px; height: 15px;
-                border: 1.5px solid #a8c8ba; border-radius: 7px; }}
-            QRadioButton::indicator:checked {{ border: 4px solid {ACCENT}; background: #fff; }}
-        """)
+        radio.setStyleSheet(_RADIO_SS)
         radio.clicked.connect(callback)
+
         desc_lbl = QLabel(description)
         desc_lbl.setWordWrap(True)
-        desc_lbl.setStyleSheet("font-size: 10px; color: #72827c; margin-left: 26px; margin-bottom: 2px;")
-        parent.layout().addWidget(radio)
-        parent.layout().addWidget(desc_lbl)
+        desc_lbl.setStyleSheet("font-size: 10px; color: #72827c; margin-left: 24px;")
+
+        row_lo.addWidget(radio)
+        row_lo.addWidget(desc_lbl)
+        parent.layout().addWidget(row_frame)
         return radio
 
-    # ── Карточки настроек ───────────────────────────────────────────────────
+    # ── Section: power profiles ────────────────────────────────────────────
 
     def _build_power_card(self) -> QFrame:
         card = self._section_card(
-            "", "Режим использования системы",
-            "Режимы производительности и охлаждения. Вы можете переключать их в любое время клавишами Fn+F."
+            "Режим использования системы",
+            "Режимы производительности и охлаждения. Переключение: Fn + F."
         )
         group = QButtonGroup(card)
         current = get_power_profile()
         for title, description, profile in (
-            ("Бесшумно",       "Ограничение частот и низкий уровень шума для работы от батареи.", "power-saver"),
-            ("Обычный",        "Сбалансированная работа для повседневных офисных задач.",          "balanced"),
-            ("Производительность", "Максимальная вычислительная мощность для игр и рендера.",      "performance"),
+            ("Бесшумно",
+             "Ограничение частот и низкий уровень шума для работы от батареи.",
+             "power-saver"),
+            ("Обычный",
+             "Сбалансированная работа для повседневных офисных задач.",
+             "balanced"),
+            ("Производительность",
+             "Максимальная вычислительная мощность для игр и рендера.",
+             "performance"),
         ):
             radio = self._radio_option(
                 card, title, description,
@@ -180,22 +236,26 @@ class SettingsTab(QWidget):
             group.addButton(radio)
         return card
 
+    # ── Section: battery ───────────────────────────────────────────────────
+
     def _build_battery_card(self) -> QFrame:
-        card = self._section_card("", "Аккумулятор и зарядка через USB",
-                                  "Режим оптимизации срока службы аккумулятора")
+        card = self._section_card(
+            "Аккумулятор и зарядка",
+            "Управление режимом зарядки для продления ресурса аккумулятора."
+        )
         group = QButtonGroup(card)
         limit = self.config.get("charge_limit", 100)
 
         radio_80 = self._radio_option(
             card,
-            "Оптимизированная зарядка аккумулятора",
-            "(Рекомендуется) Для продления срока службы аккумулятор заряжается до 80%.",
+            "Оптимизированная зарядка",
+            "(Рекомендуется) Аккумулятор заряжается до 80% для продления срока службы.",
             limit == 80,
             lambda: self._set_charge_limit(80),
         )
         radio_100 = self._radio_option(
             card,
-            "Зарядка аккумулятора до полной ёмкости",
+            "Зарядка до полной ёмкости",
             "Зарядка до 100% для максимального времени автономной работы.",
             limit != 80,
             lambda: self._set_charge_limit(100),
@@ -203,7 +263,7 @@ class SettingsTab(QWidget):
         group.addButton(radio_80)
         group.addButton(radio_100)
 
-        btn_details = QPushButton("Детальные сведения об аккумуляторе ›")
+        btn_details = QPushButton("Детальные сведения об аккумуляторе →")
         btn_details.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_details.setStyleSheet(f"""
             QPushButton {{
@@ -215,17 +275,20 @@ class SettingsTab(QWidget):
         btn_details.clicked.connect(self._open_battery_info)
         card.layout().addWidget(btn_details)
 
+        # Divider
         sep = QFrame()
         sep.setFixedHeight(1)
         sep.setStyleSheet("background: #dde7e2; border: 0; margin: 4px 0;")
         card.layout().addWidget(sep)
 
-        # USB зарядка при выключении
+        # USB charging toggle
         usb_row = QHBoxLayout()
         usb_info = QVBoxLayout()
         usb_title = QLabel("Зарядка через USB при выключенном питании")
-        usb_title.setStyleSheet("font-size: 12px; color: #323d38; font-weight: 700;")
-        usb_text = QLabel("Позволяет заряжать смартфоны от выделенного USB-порта даже при выключенном ноутбуке.")
+        usb_title.setStyleSheet("font-size: 12px; color: #2e3b35; font-weight: 600;")
+        usb_text = QLabel(
+            "Позволяет заряжать устройства от USB-порта даже при выключенном ноутбуке."
+        )
         usb_text.setWordWrap(True)
         usb_text.setStyleSheet("font-size: 10px; color: #72827c;")
         usb_info.addWidget(usb_title)
@@ -241,14 +304,15 @@ class SettingsTab(QWidget):
 
         return card
 
-    def _build_screen_card(self) -> QFrame:
-        card = self._section_card("", "Экран и защита зрения (BluelightShield)")
+    # ── Section: screen ────────────────────────────────────────────────────
 
-        # Заголовок и переключатель
+    def _build_screen_card(self) -> QFrame:
+        card = self._section_card("Экран и защита зрения")
+
         top_row = QHBoxLayout()
         info_col = QVBoxLayout()
         bl_title = QLabel("Acer BluelightShield")
-        bl_title.setStyleSheet("font-size: 13px; color: #323d38; font-weight: 700;")
+        bl_title.setStyleSheet("font-size: 13px; color: #2e3b35; font-weight: 700;")
         bl_desc = QLabel(
             "Снижает уровень синего излучения дисплея, снижая усталость глаз.\n"
             "Использует hyprsunset или wlsunset при наличии в Wayland-сессии."
@@ -270,7 +334,6 @@ class SettingsTab(QWidget):
         sep.setStyleSheet("background: #dde7e2; border: 0; margin: 4px 0;")
         card.layout().addWidget(sep)
 
-        # Пресеты фильтрации синего света
         preset_title = QLabel("Пресеты фильтрации:")
         preset_title.setStyleSheet("font-size: 11px; font-weight: 700; color: #44544d;")
         card.layout().addWidget(preset_title)
@@ -297,22 +360,13 @@ class SettingsTab(QWidget):
             btn.setFixedHeight(28)
             btn.setStyleSheet(f"""
                 QPushButton {{
-                    background: #f4f8f6;
-                    border: 1px solid #cce0d6;
-                    border-radius: 14px;
-                    color: #4a5953;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 0 12px;
+                    background: #f4f8f6; border: 1px solid #cce0d6;
+                    border-radius: 14px; color: #4a5953;
+                    font-size: 11px; font-weight: 600; padding: 0 12px;
                 }}
-                QPushButton:hover {{
-                    background: #e8f3ee;
-                    border-color: #a8d5c0;
-                }}
+                QPushButton:hover {{ background: #e8f3ee; border-color: #a8d5c0; }}
                 QPushButton:checked {{
-                    background: {ACCENT};
-                    border-color: {ACCENT_DARK};
-                    color: #ffffff;
+                    background: {ACCENT}; border-color: {ACCENT_DARK}; color: #ffffff;
                 }}
             """)
             if abs(current_temp - kelvin) < 250:
@@ -324,7 +378,6 @@ class SettingsTab(QWidget):
 
         card.layout().addLayout(presets_row)
 
-        # Ползунок точной настройки Кельвинов
         slider_row = QHBoxLayout()
         slider_row.setSpacing(12)
 
@@ -339,18 +392,17 @@ class SettingsTab(QWidget):
                 border-radius: 3px;
             }}
             QSlider::handle:horizontal {{
-                background: #ffffff;
-                border: 2px solid {ACCENT};
-                width: 16px;
-                margin: -5px 0;
-                border-radius: 8px;
+                background: #ffffff; border: 2px solid {ACCENT};
+                width: 16px; margin: -5px 0; border-radius: 8px;
             }}
         """)
         self.temp_slider.valueChanged.connect(self._on_slider_changed)
         self.temp_slider.sliderReleased.connect(self._on_slider_released)
 
         self.temp_lbl = QLabel(f"{current_temp} K")
-        self.temp_lbl.setStyleSheet("font-size: 12px; font-weight: 700; color: #323d38; min-width: 55px;")
+        self.temp_lbl.setStyleSheet(
+            "font-size: 12px; font-weight: 700; color: #2e3b35; min-width: 55px;"
+        )
 
         slider_row.addWidget(self.temp_slider, 1)
         slider_row.addWidget(self.temp_lbl)
@@ -358,42 +410,46 @@ class SettingsTab(QWidget):
 
         return card
 
+    # ── Section: Hyprland keybinds ─────────────────────────────────────────
+
     def _build_hyprland_card(self) -> QFrame:
         from core.hyprland import detect_hyprland, has_keybinds
 
         card = self._section_card(
-            "", "Горячие клавиши (Hyprland)",
-            "Интеграция с Hyprland: автоматическая настройка клавиш микрофона и смены профилей питания."
+            "Горячие клавиши (Hyprland)",
+            "Интеграция с Hyprland: автоматическая настройка клавиш микрофона "
+            "и смены профилей питания.",
         )
 
         self._hyprland_available = detect_hyprland()
         status_text  = "Hyprland обнаружен" if self._hyprland_available else "Hyprland не обнаружен"
-        status_color = "#388e6a" if self._hyprland_available else "#9a9e9c"
+        status_color = ACCENT if self._hyprland_available else "#9a9e9c"
         status_lbl = QLabel(f"Статус: {status_text}")
-        status_lbl.setStyleSheet(f"font-size: 11px; color: {status_color}; font-weight: 600;")
+        status_lbl.setStyleSheet(
+            f"font-size: 11px; color: {status_color}; font-weight: 600;"
+        )
         card.layout().addWidget(status_lbl)
 
         binds_info = QLabel(
-            "XF86Reload   →  power-cycle.sh        (Fn+F: переключение профилей)\n"
-            "XF86Launch6  →  mic-sync.sh toggle   (микрофон + LED индикатор)"
+            "XF86Reload   →  power-cycle.sh        (Fn+F: смена профиля питания)\n"
+            "XF86Launch6  →  mic-sync.sh toggle    (микрофон + LED индикатор)"
         )
         binds_info.setStyleSheet(
-            "font-size: 10px; color: #586962; font-family: monospace; "
+            "font-size: 10px; color: #586962; font-family: 'JetBrains Mono', monospace; "
             "background: #f4f8f6; border: 1px solid #dde7e2; border-radius: 6px; "
             "padding: 8px 12px; margin: 4px 0;"
         )
         card.layout().addWidget(binds_info)
 
         row = QHBoxLayout()
-        row.setSpacing(10)
-        bind_lbl = QVBoxLayout()
+        bind_col = QVBoxLayout()
         bind_title = QLabel("Активировать биндинги Acer Sense")
-        bind_title.setStyleSheet("font-size: 13px; color: #323d38; font-weight: 700;")
+        bind_title.setStyleSheet("font-size: 12px; color: #2e3b35; font-weight: 700;")
         bind_sub = QLabel("Автоматически обновляет конфиг Hyprland")
         bind_sub.setStyleSheet("font-size: 10px; color: #72827c;")
-        bind_lbl.addWidget(bind_title)
-        bind_lbl.addWidget(bind_sub)
-        row.addLayout(bind_lbl, 1)
+        bind_col.addWidget(bind_title)
+        bind_col.addWidget(bind_sub)
+        row.addLayout(bind_col, 1)
 
         self.toggle_mic_bind = ToggleSwitch()
         bound = has_keybinds() if self._hyprland_available else False
@@ -405,16 +461,18 @@ class SettingsTab(QWidget):
 
         self.mic_bind_status = QLabel("Биндинги активны" if bound else "Биндинги не установлены")
         self.mic_bind_status.setStyleSheet(
-            f"font-size: 10px; color: {'#388e6a' if bound else '#9a9e9c'}; font-weight: 600;"
+            f"font-size: 10px; color: {ACCENT if bound else '#9a9e9c'}; font-weight: 600;"
         )
         card.layout().addWidget(self.mic_bind_status)
 
-        btn_reload = QPushButton("Применить (hyprctl reload)")
+        btn_reload = QPushButton("Применить конфигурацию Hyprland")
         btn_reload.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_reload.setEnabled(bool(self._hyprland_available))
         btn_reload.setStyleSheet(f"""
-            QPushButton {{ border: 1px solid #88c2a8; border-radius: 14px; color: {ACCENT_DARK};
-                           padding: 6px 14px; font-size: 11px; font-weight: 600; background: #fff; }}
+            QPushButton {{
+                border: 1px solid #88c2a8; border-radius: 12px; color: {ACCENT_DARK};
+                padding: 7px 16px; font-size: 11px; font-weight: 600; background: #fff;
+            }}
             QPushButton:hover {{ background: #edf8f2; }}
             QPushButton:disabled {{ color: #9ab0a8; border-color: #c8ddd2; }}
         """)
@@ -422,7 +480,7 @@ class SettingsTab(QWidget):
         card.layout().addWidget(btn_reload)
         return card
 
-    # ── Вспомогательные методы ───────────────────────────────────────────────
+    # ── Helpers ────────────────────────────────────────────────────────────
 
     def _show_section(self, section: QFrame, button: QPushButton):
         button.setChecked(True)
@@ -468,8 +526,10 @@ class SettingsTab(QWidget):
 
     def _apply_night_light(self, enabled: bool):
         temp = self.config.get("bluelight_temp", 4500)
-        tool = ("hyprsunset" if shutil.which("hyprsunset")
-                else "wlsunset" if shutil.which("wlsunset") else None)
+        tool = (
+            "hyprsunset" if shutil.which("hyprsunset")
+            else "wlsunset" if shutil.which("wlsunset") else None
+        )
         if self.night_proc:
             try:
                 self.night_proc.terminate()
@@ -484,20 +544,24 @@ class SettingsTab(QWidget):
         from core.hyprland import install_keybinds, remove_keybinds
         if enabled:
             ok = install_keybinds()
-            self.mic_bind_status.setText("Биндинги установлены" if ok else "Ошибка установки")
+            self.mic_bind_status.setText(
+                "Биндинги установлены" if ok else "Ошибка установки"
+            )
             self.mic_bind_status.setStyleSheet(
-                f"font-size: 10px; color: {'#388e6a' if ok else '#c44040'}; font-weight: 600;"
+                f"font-size: 10px; color: {ACCENT if ok else '#c44040'}; font-weight: 600;"
             )
         else:
             ok = remove_keybinds()
             self.mic_bind_status.setText("Биндинги удалены" if ok else "Ошибка удаления")
-            self.mic_bind_status.setStyleSheet("font-size: 10px; color: #9a9e9c;")
+            self.mic_bind_status.setStyleSheet(
+                "font-size: 10px; color: #9a9e9c; font-weight: 600;"
+            )
 
     def _hyprctl_reload(self):
         from core.hyprland import reload_hyprland
-        ok = reload_hyprland()
         from PyQt6.QtWidgets import QMessageBox
+        ok = reload_hyprland()
         if ok:
-            QMessageBox.information(self, "Hyprland", "Конфигурация перезагружена успешно.")
+            QMessageBox.information(self, "Hyprland", "Конфигурация перезагружена.")
         else:
             QMessageBox.warning(self, "Hyprland", "Не удалось выполнить hyprctl reload.")

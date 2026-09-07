@@ -16,61 +16,33 @@ ec_path=/sys/kernel/debug/ec/ec0/io
 
 case "${1:-}" in
     80)
-        # 1. WMI driver interface if available
-        for p in /sys/bus/wmi/drivers/acer-wmi-battery/health_mode \
-                 /sys/devices/platform/acer-wmi/health_mode; do
-            if [ -w "$p" ]; then
-                echo 1 > "$p" 2>/dev/null || true
-            fi
-        done
-        # 2. Sysfs battery threshold
+        # Direct EC register 221 (0xDD) -> 80% charge limit
+        if [ -w "$ec_path" ]; then
+            printf "\x80" | dd of="$ec_path" bs=1 seek=221 count=1 conv=notrunc status=none
+        fi
+        # Sysfs fallback if exposed by kernel
         for bat in /sys/class/power_supply/BAT*; do
             if [ -w "$bat/charge_control_end_threshold" ]; then
                 echo 80 > "$bat/charge_control_end_threshold" 2>/dev/null || true
             fi
         done
-        # 3. Direct EC register 221 (0xDD)
-        if [ -w "$ec_path" ]; then
-            printf "\x80" | dd of="$ec_path" bs=1 seek=221 count=1 conv=notrunc status=none
-        fi
         ;;
     100)
-        # 1. WMI driver interface if available
-        for p in /sys/bus/wmi/drivers/acer-wmi-battery/health_mode \
-                 /sys/devices/platform/acer-wmi/health_mode; do
-            if [ -w "$p" ]; then
-                echo 0 > "$p" 2>/dev/null || true
-            fi
-        done
-        # 2. Sysfs battery threshold
+        # Direct EC register 221 (0xDD) -> 100% full charge
+        if [ -w "$ec_path" ]; then
+            printf "\x00" | dd of="$ec_path" bs=1 seek=221 count=1 conv=notrunc status=none
+        fi
+        # Sysfs fallback if exposed by kernel
         for bat in /sys/class/power_supply/BAT*; do
             if [ -w "$bat/charge_control_end_threshold" ]; then
                 echo 100 > "$bat/charge_control_end_threshold" 2>/dev/null || true
             fi
         done
-        # 3. Direct EC register 221 (0xDD)
-        if [ -w "$ec_path" ]; then
-            printf "\x00" | dd of="$ec_path" bs=1 seek=221 count=1 conv=notrunc status=none
-        fi
         ;;
     get)
-        # 1. Check WMI driver if present
-        for p in /sys/bus/wmi/drivers/acer-wmi-battery/health_mode \
-                 /sys/devices/platform/acer-wmi/health_mode; do
-            if [ -r "$p" ]; then
-                val=$(cat "$p" 2>/dev/null | tr -d ' \n')
-                if [ "$val" = "1" ]; then
-                    echo "80"
-                    exit 0
-                elif [ "$val" = "0" ]; then
-                    echo "100"
-                    exit 0
-                fi
-            fi
-        done
-        # 2. Check EC register 221 (0xDD)
+        # Read current hardware limit from EC register 221 (0xDD)
         if [ -r "$ec_path" ]; then
-            val=$(od -An -j221 -N1 -t x1 "$ec_path" | tr -d ' \n')
+            val=$(od -An -j221 -N1 -t x1 "$ec_path" 2>/dev/null | tr -d ' \n')
             if [ "$val" = "80" ]; then
                 echo "80"
             elif [ "$val" = "00" ]; then
@@ -81,6 +53,22 @@ case "${1:-}" in
         else
             exit 1
         fi
+        ;;
+    cycles|cycle-count)
+        # Read battery cycle count from EC register 244-245 (0xF4-0xF5)
+        if [ -r "$ec_path" ]; then
+            c=$(od -An -j244 -N2 -t u2 "$ec_path" 2>/dev/null | tr -d ' \n')
+            if [ -n "$c" ] && [ "$c" -gt 0 ] && [ "$c" -lt 60000 ]; then
+                echo "$c"
+                exit 0
+            fi
+            c=$(od -An -j245 -N1 -t u1 "$ec_path" 2>/dev/null | tr -d ' \n')
+            if [ -n "$c" ] && [ "$c" -gt 0 ]; then
+                echo "$c"
+                exit 0
+            fi
+        fi
+        echo "0"
         ;;
     dump)
         if [ -r "$ec_path" ]; then

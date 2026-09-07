@@ -1,3 +1,11 @@
+"""Diagnostics tab — professional redesign.
+
+Rules:
+- No emoji anywhere.
+- Category badge labels: АККУМУЛЯТОР / НАКОПИТЕЛЬ / ОПЕРАТИВНАЯ ПАМЯТЬ / ОХЛАЖДЕНИЕ
+- «Проверить всё» button: compact, accent, no emoji.
+- Clean card layout, consistent spacing.
+"""
 from __future__ import annotations
 
 from datetime import datetime
@@ -19,17 +27,24 @@ from ui.details_dialogs import SystemInfoDialog
 
 ACCENT = "#4ba781"
 STATUS_STYLE = {
-    GOOD:     ("Хорошее",           "#469d79"),
-    WARNING:  ("Требует внимания",   "#b77b27"),
-    CRITICAL: ("Обнаружена проблема","#c45151"),
-    UNKNOWN:  ("Недоступно",         "#7d8581"),
+    GOOD:     ("Хорошее",            "#469d79"),
+    WARNING:  ("Требует внимания",    "#b77b27"),
+    CRITICAL: ("Обнаружена проблема", "#c45151"),
+    UNKNOWN:  ("Недоступно",          "#7d8581"),
 }
 ACER_SUPPORT_URL = "https://www.acer.com/ru-ru/support"
 
+# Category badges — no emoji, no unicode symbols
+_BADGE_STYLE = (
+    "font-size: 9px; font-weight: 700; letter-spacing: 0.6px;"
+    " color: #5a6f68; background: #eaf3ef; border: 1px solid #c8ddd6;"
+    " border-radius: 4px; padding: 2px 8px;"
+)
 
-# ──────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Worker thread
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 class DeepCheckWorker(QThread):
     progress_changed = pyqtSignal(str, int, str)
@@ -60,9 +75,9 @@ class DeepCheckWorker(QThread):
         self.complete.emit()
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Диалог «Калибровка аккумулятора»
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Battery calibration dialog
+# ─────────────────────────────────────────────────────────────────────────────
 
 class BatteryCalibrationDialog(QDialog):
     def __init__(self, parent=None):
@@ -102,12 +117,10 @@ class BatteryCalibrationDialog(QDialog):
 1. Зарядите аккумулятор до **100%** при подключённом зарядном устройстве.
 2. Оставьте ноутбук подключённым ещё **2 часа** после достижения 100%.
 3. Отключите зарядное устройство.
-4. Используйте ноутбук, пока не появится предупреждение о низком заряде (примерно 5%).
+4. Используйте ноутбук, пока не появится предупреждение о низком заряде (~5%).
 5. Подключите зарядное устройство и зарядите до **100%** не прерываясь.
 
 **Рекомендуемая частота:** раз в 3–6 месяцев.
-
-> ⚠ Не разряжайте аккумулятор до нуля — это может его повредить.
         """)
         layout.addWidget(instructions)
 
@@ -116,12 +129,12 @@ class BatteryCalibrationDialog(QDialog):
         layout.addWidget(buttons)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Главный виджет вкладки
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# Main tab widget
+# ─────────────────────────────────────────────────────────────────────────────
 
 class CheckupTab(QWidget):
-    """Acer Sense-like detailed diagnostics; memory workload is safely bounded."""
+    """Hardware diagnostics tab — professional layout, no emoji."""
 
     def __init__(self):
         super().__init__()
@@ -161,11 +174,11 @@ class CheckupTab(QWidget):
 
         main_holder = QWidget()
         main_holder.setLayout(main_column)
-        main_holder.setMinimumWidth(560)
+        main_holder.setMinimumWidth(540)
 
         side_holder = QWidget()
         side_holder.setLayout(side_column)
-        side_holder.setFixedWidth(280)
+        side_holder.setFixedWidth(268)
 
         outer.addWidget(main_holder, 1)
         outer.addWidget(side_holder)
@@ -175,78 +188,99 @@ class CheckupTab(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(scroll)
 
-    # ── Шапка ───────────────────────────────────────────────────────────────
+    # ── Header ──────────────────────────────────────────────────────────────
 
     def _build_header(self) -> QHBoxLayout:
         header = QHBoxLayout()
         header.setSpacing(16)
 
         left = QVBoxLayout()
-        title = QLabel("Проверить")
+        left.setSpacing(8)
+
+        title = QLabel("Диагностика компонентов")
         title.setStyleSheet("font-size: 14px; font-weight: 700; color: #3f4743;")
 
-        self.btn_check_all = QPushButton("🔍  Проверить всё")
+        # Compact professional button — no emoji
+        self.btn_check_all = QPushButton("Проверить всё")
         self.btn_check_all.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_check_all.setFixedSize(156, 80)
+        self.btn_check_all.setFixedHeight(36)
         self.btn_check_all.setStyleSheet(f"""
             QPushButton {{
-                background: #bcebd9; color: #2d7357;
-                border: 1px solid #8dcfb2; border-radius: 16px;
-                font-size: 13px; font-weight: 700;
+                background: {ACCENT};
+                color: #ffffff;
+                border: none;
+                border-radius: 10px;
+                font-size: 12px;
+                font-weight: 700;
+                padding: 0 20px;
             }}
-            QPushButton:hover {{ background: #a9e2ca; }}
-            QPushButton:disabled {{ color: #799a8d; background: #d8eee4; }}
+            QPushButton:hover {{
+                background: #3d9672;
+            }}
+            QPushButton:pressed {{
+                background: #327a5e;
+            }}
+            QPushButton:disabled {{
+                color: #a5c5b8;
+                background: #d8eee4;
+            }}
         """)
         self.btn_check_all.clicked.connect(self.check_all)
         left.addWidget(title)
-        left.addSpacing(3)
         left.addWidget(self.btn_check_all)
         header.addLayout(left)
 
         desc = QLabel(
-            "Проверка работоспособности компонентов,\n"
-            "включая аккумулятор, накопители и RAM."
+            "Проверка работоспособности компонентов:\n"
+            "аккумулятор, накопители и оперативная память."
         )
         desc.setWordWrap(True)
-        desc.setStyleSheet("font-size: 11px; line-height: 1.4; color: #7a847f; padding-top: 26px;")
+        desc.setStyleSheet(
+            "font-size: 11px; line-height: 1.4; color: #7a847f; padding-top: 20px;"
+        )
         header.addWidget(desc, 1)
 
-        # Ссылки справа
         links_layout = QVBoxLayout()
         links_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight)
         links_layout.setSpacing(6)
+
         sys_info_link = QLabel(
             f"<a href='sysinfo' style='color:{ACCENT};text-decoration:none;"
-            "font-size:11px;font-weight:600;'>Сведения о системе ⓘ</a>"
+            "font-size:11px;font-weight:600;'>Сведения о системе</a>"
         )
         sys_info_link.setOpenExternalLinks(False)
         sys_info_link.linkActivated.connect(self.open_system_info)
+
         support_link = QLabel(
             f"<a href='support' style='color:{ACCENT};text-decoration:none;"
-            "font-size:11px;font-weight:600;'>Техническая поддержка ⓘ</a>"
+            "font-size:11px;font-weight:600;'>Техническая поддержка</a>"
         )
         support_link.setOpenExternalLinks(False)
         support_link.linkActivated.connect(lambda: webbrowser.open(ACER_SUPPORT_URL))
+
         links_layout.addWidget(sys_info_link)
         links_layout.addWidget(support_link)
         header.addLayout(links_layout)
         return header
 
-    # ── Фабрика карточек ─────────────────────────────────────────────────────
+    # ── Card factory ─────────────────────────────────────────────────────────
 
     def _card_frame(self) -> QFrame:
         card = QFrame()
         card.setObjectName("diagnosticCard")
         card.setStyleSheet("""
-            QFrame#diagnosticCard { background: #ffffff; border: 1px solid #dde8e3; border-radius: 16px; }
+            QFrame#diagnosticCard {
+                background: #ffffff;
+                border: 1px solid #dde8e3;
+                border-radius: 16px;
+            }
             QLabel { border: 0; background: transparent; }
         """)
         return card
 
     def _colored_bar(self, percent: int) -> QFrame:
-        """Горизонтальная полоска прогресса (как на скриншотах)."""
         bar = QFrame()
-        bar.setFixedHeight(7)
+        bar.setFixedHeight(6)
         bar.setObjectName("driveBar")
         filled = max(0.01, min(1.0, percent / 100))
         color = ACCENT if percent < 85 else ("#e6a020" if percent < 95 else "#c44040")
@@ -260,32 +294,37 @@ class CheckupTab(QWidget):
         """)
         return bar
 
-    def _add_card(self, target: QVBoxLayout, card_id: str, icon: str, title: str,
+    def _add_card(self, target: QVBoxLayout, card_id: str, badge: str, title: str,
                   overview_widget: QWidget | None, payload: dict | None = None):
         card = self._card_frame()
         card_layout = QHBoxLayout(card)
         card_layout.setContentsMargins(16, 14, 16, 14)
         card_layout.setSpacing(18)
 
-        # Левая панель: статус + кнопка
         left = QVBoxLayout()
         left.setSpacing(6)
         left.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        heading = QLabel(f"{icon}  {title}")
-        heading.setStyleSheet("font-size: 15px; color: #515a56; font-weight: 700;")
+        badge_lbl = QLabel(badge)
+        badge_lbl.setStyleSheet(_BADGE_STYLE)
+        badge_lbl.setFixedHeight(20)
+
+        heading = QLabel(title)
+        heading.setStyleSheet("font-size: 14px; color: #3d4743; font-weight: 700;")
 
         rule = QFrame()
         rule.setFixedHeight(1)
         rule.setStyleSheet("background: #cbe5d9; border: 0;")
 
         status = QLabel("Не проверено")
-        status.setStyleSheet("font-size: 13px; color: #7c8580; font-weight: 700; margin-top: 2px;")
+        status.setStyleSheet(
+            "font-size: 12px; color: #7c8580; font-weight: 600; margin-top: 2px;"
+        )
 
         progress = QProgressBar()
         progress.setRange(0, 100)
         progress.setTextVisible(False)
-        progress.setFixedHeight(5)
+        progress.setFixedHeight(4)
         progress.setStyleSheet(f"""
             QProgressBar {{ border: 0; background: #dceae3; border-radius: 2px; }}
             QProgressBar::chunk {{ background: {ACCENT}; border-radius: 2px; }}
@@ -294,10 +333,13 @@ class CheckupTab(QWidget):
 
         btn = QPushButton("Проверить")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setFixedSize(128, 30)
+        btn.setFixedSize(110, 28)
         btn.setStyleSheet(f"""
-            QPushButton {{ background: #fff; color: #4d8a73; border: 1px solid #88c2a8;
-                           border-radius: 15px; font-size: 12px; font-weight: 600; }}
+            QPushButton {{
+                background: #fff; color: {ACCENT};
+                border: 1px solid #88c2a8; border-radius: 14px;
+                font-size: 11px; font-weight: 600;
+            }}
             QPushButton:hover {{ background: #edf8f2; }}
             QPushButton:disabled {{ color: #a0b8ae; border-color: #c5dbd2; }}
         """)
@@ -305,6 +347,7 @@ class CheckupTab(QWidget):
         checked_at = QLabel("Последняя проверка: —")
         checked_at.setStyleSheet("font-size: 10px; color: #9ea8a2;")
 
+        left.addWidget(badge_lbl)
         left.addWidget(heading)
         left.addWidget(rule)
         left.addWidget(status)
@@ -324,17 +367,19 @@ class CheckupTab(QWidget):
         }
         btn.clicked.connect(lambda _, key=card_id: self.start_cards([key]))
 
-    # ── Конкретные карточки ───────────────────────────────────────────────────
+    # ── Specific cards ───────────────────────────────────────────────────────
 
     def _add_battery_card(self, target: QVBoxLayout):
         battery = get_battery_info()
-        charge = battery["percent"]
-        temp = battery.get("temperature")
-        cycles = battery.get("cycles")
+        charge  = battery["percent"]
+        temp    = battery.get("temperature")
+        cycles  = battery.get("cycles")
 
         detail = QFrame()
         detail.setObjectName("detailBox")
-        detail.setStyleSheet("QFrame#detailBox { background: #f9fafa; border: 0; border-radius: 8px; }")
+        detail.setStyleSheet(
+            "QFrame#detailBox { background: #f9fafa; border: 0; border-radius: 8px; }"
+        )
         dv = QVBoxLayout(detail)
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(6)
@@ -344,48 +389,38 @@ class CheckupTab(QWidget):
             lbl.setTextFormat(Qt.TextFormat.RichText)
             dv.addWidget(lbl)
             if charge is not None and label == "Заряд аккумулятора":
-                bar = self._colored_bar(charge)
-                dv.addWidget(bar)
+                dv.addWidget(self._colored_bar(charge))
             val_lbl = QLabel(value)
             val_lbl.setStyleSheet("font-size: 11px; color: #6b7470;")
             dv.addWidget(val_lbl)
 
-        charge_str = f"{charge}%" if charge is not None else "Недоступен"
-        _row("Заряд аккумулятора", charge_str)
+        _row("Заряд аккумулятора", f"{charge}%" if charge is not None else "Недоступен")
         if temp is not None:
             _row("Температура", f"{temp}°C")
         if cycles is not None:
             _row("Количество циклов", str(cycles))
 
-        # Кнопка детальных сведений
-        btn_card_details = QPushButton("Детальные сведения об аккумуляторе ›")
+        btn_card_details = QPushButton("Детальные сведения об аккумуляторе →")
         btn_card_details.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_card_details.setStyleSheet(f"""
             QPushButton {{
-                text-align: left;
-                background: transparent;
-                border: 0;
-                color: {ACCENT};
-                font-size: 11px;
-                font-weight: 600;
-                padding: 6px 0 2px 0;
+                text-align: left; background: transparent; border: 0;
+                color: {ACCENT}; font-size: 11px; font-weight: 600; padding: 6px 0 2px 0;
             }}
-            QPushButton:hover {{
-                color: #27684d;
-                text-decoration: underline;
-            }}
+            QPushButton:hover {{ color: #27684d; text-decoration: underline; }}
         """)
         btn_card_details.clicked.connect(self._open_battery_info)
         dv.addWidget(btn_card_details)
-
         dv.addStretch(1)
 
-        self._add_card(target, "battery", "■", "Аккумулятор", detail)
+        self._add_card(target, "battery", "АККУМУЛЯТОР", "Аккумулятор", detail)
 
     def _add_drive_card(self, target: QVBoxLayout, card_id: str, drive: dict):
         detail = QFrame()
         detail.setObjectName("detailBox")
-        detail.setStyleSheet("QFrame#detailBox { background: #f9fafa; border: 0; border-radius: 8px; }")
+        detail.setStyleSheet(
+            "QFrame#detailBox { background: #f9fafa; border: 0; border-radius: 8px; }"
+        )
         dv = QVBoxLayout(detail)
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(5)
@@ -395,18 +430,20 @@ class CheckupTab(QWidget):
             mount_lbl.setStyleSheet("font-size: 11px; color: #585f5c; font-weight: 600;")
             dv.addWidget(mount_lbl)
             dv.addWidget(self._colored_bar(int(part["percent"])))
-            info = QLabel(f"осталось {part['free_gb']} ГБ, всего {part['total_gb']} ГБ")
+            info = QLabel(f"свободно {part['free_gb']} ГБ из {part['total_gb']} ГБ")
             info.setStyleSheet("font-size: 10px; color: #7a8480;")
             dv.addWidget(info)
         dv.addStretch(1)
 
-        self._add_card(target, card_id, "◉", drive["model"], detail, drive)
+        self._add_card(target, card_id, "НАКОПИТЕЛЬ", drive["model"], detail, drive)
 
     def _add_memory_card(self, target: QVBoxLayout):
         memory = get_ram_info()
         detail = QFrame()
         detail.setObjectName("detailBox")
-        detail.setStyleSheet("QFrame#detailBox { background: #f9fafa; border: 0; border-radius: 8px; }")
+        detail.setStyleSheet(
+            "QFrame#detailBox { background: #f9fafa; border: 0; border-radius: 8px; }"
+        )
         dv = QVBoxLayout(detail)
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(5)
@@ -415,36 +452,45 @@ class CheckupTab(QWidget):
         ram_lbl.setStyleSheet("font-size: 11px; color: #585f5c; font-weight: 600;")
         dv.addWidget(ram_lbl)
         dv.addWidget(self._colored_bar(int(memory["percent"])))
-        dv.addWidget(QLabel(f"{memory['percent']}%  ({memory['used_gb']} / {memory['total_gb']} ГБ)"))
-        note = QLabel("Стресс-тест ОЗУ: до 8% свободной памяти, не более 512 МБ")
+        dv.addWidget(
+            QLabel(f"{memory['percent']}%  ({memory['used_gb']} / {memory['total_gb']} ГБ)")
+        )
+        note = QLabel("Стресс-тест ОЗУ занимает до 8% свободной памяти, не более 512 МБ.")
         note.setWordWrap(True)
-        note.setStyleSheet("font-size: 10px; color: #95a09a; margin-top: 6px;")
+        note.setStyleSheet("font-size: 10px; color: #95a09a; margin-top: 4px;")
         dv.addWidget(note)
         dv.addStretch(1)
 
-        self._add_card(target, "memory", "◈", "ОЗУ", detail)
+        self._add_card(target, "memory", "ОПЕРАТИВНАЯ ПАМЯТЬ", "Оперативная память", detail)
 
     def _add_system_card(self, target: QVBoxLayout):
         detail = QFrame()
         detail.setObjectName("detailBox")
-        detail.setStyleSheet("QFrame#detailBox { background: #f9fafa; border: 0; border-radius: 8px; }")
+        detail.setStyleSheet(
+            "QFrame#detailBox { background: #f9fafa; border: 0; border-radius: 8px; }"
+        )
         dv = QVBoxLayout(detail)
         dv.setContentsMargins(12, 10, 12, 10)
         dv.setSpacing(4)
-        note = QLabel("Пять замеров температурных датчиков за 10 секунд.\n"
-                      "Результат включает все доступные тепловые зоны.")
+        note = QLabel(
+            "Пять замеров температурных датчиков за 10 секунд.\n"
+            "Результат включает все доступные тепловые зоны."
+        )
         note.setWordWrap(True)
         note.setStyleSheet("font-size: 11px; color: #7a8480;")
         dv.addWidget(note)
         dv.addStretch(1)
-        self._add_card(target, "system", "◌", "Система и охлаждение", detail)
+        self._add_card(target, "system", "ОХЛАЖДЕНИЕ", "Система и охлаждение", detail)
 
-    # ── Боковые карточки ──────────────────────────────────────────────────────
+    # ── Side cards ───────────────────────────────────────────────────────────
 
     def _side_card(self) -> QFrame:
         card = QFrame()
-        card.setStyleSheet("QFrame { background: #ffffff; border: 1px solid #dde8e3;"
-                           "border-radius: 14px; } QLabel { border: 0; background: transparent; }")
+        card.setStyleSheet(
+            "QFrame { background: #ffffff; border: 1px solid #dde8e3;"
+            " border-radius: 14px; }"
+            " QLabel { border: 0; background: transparent; }"
+        )
         return card
 
     def _build_battery_optimize_card(self) -> QFrame:
@@ -460,39 +506,28 @@ class CheckupTab(QWidget):
         btn_calib = QPushButton("Калибровка аккумулятора")
         btn_calib.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_calib.setStyleSheet(f"""
-            QPushButton {{ border: 1px solid #88c2a8; border-radius: 14px; color: #4d8a73;
-                           padding: 7px; font-size: 11px; font-weight: 600; background: #fff; }}
+            QPushButton {{
+                border: 1px solid #88c2a8; border-radius: 12px; color: #4d8a73;
+                padding: 7px; font-size: 11px; font-weight: 600; background: #fff;
+            }}
             QPushButton:hover {{ background: #edf8f2; }}
         """)
         btn_calib.clicked.connect(self.open_calibration)
         layout.addWidget(btn_calib)
-
-        last = QLabel("Последняя проверка: —")
-        last.setStyleSheet("font-size: 10px; color: #9aa3a0;")
-        layout.addWidget(last)
 
         sep = QFrame()
         sep.setFixedHeight(1)
         sep.setStyleSheet("background: #dde9e3; border: 0;")
         layout.addWidget(sep)
 
-        # Кнопка детальных сведений об аккумуляторе
-        btn_details = QPushButton("Детальные сведения об аккумуляторе ›")
+        btn_details = QPushButton("Детальные сведения →")
         btn_details.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_details.setStyleSheet(f"""
             QPushButton {{
-                text-align: left;
-                background: transparent;
-                border: 0;
-                color: {ACCENT};
-                font-size: 11px;
-                font-weight: 600;
-                padding: 4px 0;
+                text-align: left; background: transparent; border: 0;
+                color: {ACCENT}; font-size: 11px; font-weight: 600; padding: 4px 0;
             }}
-            QPushButton:hover {{
-                color: #27684d;
-                text-decoration: underline;
-            }}
+            QPushButton:hover {{ color: #27684d; text-decoration: underline; }}
         """)
         btn_details.clicked.connect(self._open_battery_info)
         layout.addWidget(btn_details)
@@ -511,8 +546,10 @@ class CheckupTab(QWidget):
         btn = QPushButton("Быстрая очистка")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(f"""
-            QPushButton {{ border: 1px solid #88c2a8; border-radius: 14px; color: #4d8a73;
-                           padding: 7px; font-size: 11px; font-weight: 600; background: #fff; }}
+            QPushButton {{
+                border: 1px solid #88c2a8; border-radius: 12px; color: #4d8a73;
+                padding: 7px; font-size: 11px; font-weight: 600; background: #fff;
+            }}
             QPushButton:hover {{ background: #edf8f2; }}
         """)
         btn.clicked.connect(self.cleanup_trash)
@@ -544,15 +581,17 @@ class CheckupTab(QWidget):
         btn = QPushButton("Открыть сведения")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setStyleSheet(f"""
-            QPushButton {{ border: 1px solid #88c2a8; border-radius: 14px; color: #4d8a73;
-                           padding: 7px; font-size: 11px; font-weight: 600; background: #fff; }}
+            QPushButton {{
+                border: 1px solid #88c2a8; border-radius: 12px; color: #4d8a73;
+                padding: 7px; font-size: 11px; font-weight: 600; background: #fff;
+            }}
             QPushButton:hover {{ background: #edf8f2; }}
         """)
         btn.clicked.connect(self.open_system_info)
         layout.addWidget(btn)
         return card
 
-    # ── Действия ──────────────────────────────────────────────────────────────
+    # ── Actions ──────────────────────────────────────────────────────────────
 
     def _refresh_trash_summary(self):
         stats = get_trash_stats()
@@ -579,8 +618,10 @@ class CheckupTab(QWidget):
             QMessageBox.information(self, "Быстрая очистка",
                                     "Корзина текущего пользователя уже пуста.")
             return
-        msg = (f"Удалить {stats['count']} файлов ({format_size(stats['size'])}) "
-               f"из ~/.local/share/Trash?\nВосстановить их после очистки нельзя.")
+        msg = (
+            f"Удалить {stats['count']} файлов ({format_size(stats['size'])}) "
+            f"из ~/.local/share/Trash?\nВосстановить их после очистки нельзя."
+        )
         ans = QMessageBox.question(
             self, "Быстрая очистка", msg,
             QMessageBox.StandardButton.Cancel | QMessageBox.StandardButton.Yes,
@@ -593,7 +634,7 @@ class CheckupTab(QWidget):
         QMessageBox.information(self, "Быстрая очистка",
                                 f"Удалено: {removed['count']} файлов, {format_size(removed['size'])}.")
 
-    # ── Управление диагностикой ───────────────────────────────────────────────
+    # ── Diagnostics control ───────────────────────────────────────────────────
 
     def check_all(self):
         if self.worker and self.worker.isRunning():
@@ -623,10 +664,12 @@ class CheckupTab(QWidget):
             c["button"].setEnabled(False)
             c["progress"].setValue(0)
             c["progress"].show()
-            c["status"].setText("Подготовка…")
-            c["status"].setStyleSheet("font-size: 13px; color: #4d8a73; font-weight: 700; margin-top: 2px;")
+            c["status"].setText("Подготовка...")
+            c["status"].setStyleSheet(
+                "font-size: 12px; color: #4d8a73; font-weight: 600; margin-top: 2px;"
+            )
 
-        self.btn_check_all.setText("✕  Отменить")
+        self.btn_check_all.setText("Отменить")
         self.worker = DeepCheckWorker(tasks, parent=self)
         self.worker.progress_changed.connect(self.update_progress)
         self.worker.result_ready.connect(self.apply_result)
@@ -642,7 +685,9 @@ class CheckupTab(QWidget):
         c = self.cards[card_id]
         status_name, color = STATUS_STYLE[result["status"]]
         c["status"].setText(status_name)
-        c["status"].setStyleSheet(f"font-size: 13px; color: {color}; font-weight: 700; margin-top: 2px;")
+        c["status"].setStyleSheet(
+            f"font-size: 12px; color: {color}; font-weight: 700; margin-top: 2px;"
+        )
         details = result["details"]
         if card_id == "battery":
             details = [ln for ln in details if not ln.startswith("Заряд:")]
@@ -661,4 +706,4 @@ class CheckupTab(QWidget):
             c["progress"].hide()
         self.active_card_ids = []
         self.btn_check_all.setEnabled(True)
-        self.btn_check_all.setText("🔍  Проверить всё")
+        self.btn_check_all.setText("Проверить всё")
