@@ -1,0 +1,12 @@
+[Unit]
+Description=Acer Fan Profile Sync
+After=dbus.service power-profiles-daemon.service[cite: 4]
+
+[Service]
+Type=simple[cite: 4]
+ExecStart=/usr/lib/acer-sense/scripts/acer-fans.sh
+Restart=always[cite: 4]
+RestartSec=2[cite: 4]
+
+[Install]
+WantedBy=graphical.target[cite: 4]

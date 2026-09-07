@@ -1,0 +1,15 @@
+#!/bin/bash
+if [ "$1" == "toggle" ]; then[cite: 3]
+    wpctl set-mute @DEFAULT_AUDIO_SOURCE@ toggle[cite: 3]
+    sleep 0.05[cite: 3]
+else[cite: 3]
+    sleep 2[cite: 3]
+fi[cite: 3]
+
+if wpctl get-volume @DEFAULT_AUDIO_SOURCE@ | grep -q "MUTED"; then[cite: 3]
+    hda-verb /dev/snd/hwC0D0 0x01 SET_GPIO_MASK 0x04[cite: 3]
+    hda-verb /dev/snd/hwC0D0 0x01 SET_GPIO_DIRECTION 0x04[cite: 3]
+    hda-verb /dev/snd/hwC0D0 0x01 SET_GPIO_DATA 0x04[cite: 3]
+else[cite: 3]
+    hda-verb /dev/snd/hwC0D0 0x01 SET_GPIO_DATA 0x00[cite: 3]
+fi[cite: 3]

@@ -1,0 +1,11 @@
+[Unit]
+Description=Acer Mic LED Sync On Startup
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/acer-sense/scripts/mic-sync.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=graphical-session.target

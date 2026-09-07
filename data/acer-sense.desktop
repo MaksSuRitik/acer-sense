@@ -1,0 +1,9 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Name=Acer Sense
+Comment=Control center for Acer laptops
+Exec=/usr/bin/acer-sense
+Icon=computer
+Terminal=false
+Type=Application
+Categories=System;Settings;HardwareSettings;
