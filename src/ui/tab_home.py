@@ -1,4 +1,4 @@
-"""Home tab — system profiles, live parameters (CPU/GPU separate temps), and battery status."""
+"""Home tab — official AcerSense styling with vector speedometer profile buttons and dual temps."""
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, QTimer, QRectF, QPointF
@@ -10,18 +10,19 @@ from core.power import get_power_profile, set_power_profile
 from core.sensors import (get_battery_info, get_cpu_temp, get_cpu_usage,
                            get_gpu_temp, get_ram_info)
 from ui.details_dialogs import BatteryInfoDialog
+from ui.icons import render_svg_pixmap
 from ui.theme import ThemePalette, theme_manager
 
 _PROFILE_MODES = [
-    ("power-saver",  "🍃 Бесшумно",          "Энергосбережение"),
-    ("balanced",     "⚖️ Обычный",            "Оптимальный баланс"),
-    ("performance",  "🚀 Производительность", "Максимум мощности"),
+    ("power-saver",  "speedo_quiet",       "Бесшумно",          "Энергосбережение"),
+    ("balanced",     "speedo_balanced",    "Обычный",            "Оптимальный баланс"),
+    ("performance",  "speedo_performance", "Производительность", "Максимум мощности"),
 ]
 
 _PROFILE_HINTS = {
-    "power-saver": "Ограничивает частоты ЦП и снижает шум вентиляторов. Идеально для работы от батареи, чтения и звонков.",
-    "balanced":    "Автоматически регулирует производительность под текущие задачи: работа с документами, браузинг, видео.",
-    "performance": "Максимальная вычислительная мощность и активное охлаждение. Рекомендуется для игр, компиляции и рендеринга.",
+    "power-saver": "Ограничивает частоты ЦП и снижает шум вентиляторов. Для веб-сайтов или онлайн-бесед.",
+    "balanced":    "Для работы, например, с офисными приложениями, документами и видео.",
+    "performance": "Максимальная вычислительная мощность для игр, компиляции, 3D и рендеринга.",
 }
 
 
@@ -30,7 +31,7 @@ _PROFILE_HINTS = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 class RingProgress(QWidget):
-    def __init__(self, size: int = 60, parent=None):
+    def __init__(self, size: int = 64, parent=None):
         super().__init__(parent)
         self.setFixedSize(size, size)
         self.value = 0.0
@@ -45,35 +46,36 @@ class RingProgress(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         pal = theme_manager.palette
-        r = QRectF(5, 5, self.width() - 10, self.height() - 10)
+        r = QRectF(6, 6, self.width() - 12, self.height() - 12)
 
-        p.setPen(QPen(QColor(pal.progress_track), 4))
+        p.setPen(QPen(QColor(pal.progress_track), 5))
         p.drawArc(r, 0, 360 * 16)
 
         if self.value > 0:
-            fill_pen = QPen(QColor(pal.accent), 4)
+            fill_pen = QPen(QColor(pal.accent), 5)
             fill_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             p.setPen(fill_pen)
             p.drawArc(r, 90 * 16, int(-self.value * 3.6 * 16))
 
         p.setPen(QColor(pal.text_primary))
-        p.setFont(QFont("Inter", 8, QFont.Weight.DemiBold))
+        p.setFont(QFont("Inter", 9, QFont.Weight.Bold))
         text = self.label if self.label else f"{int(self.value)}%"
         p.drawText(r, Qt.AlignmentFlag.AlignCenter, text)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Profile button
+# Profile button (matching original AcerSense speedometer buttons)
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ProfileButton(QPushButton):
-    def __init__(self, mode: str, label: str, subtitle: str, parent=None):
+    def __init__(self, mode: str, icon_name: str, label: str, subtitle: str, parent=None):
         super().__init__(parent)
         self._mode = mode
+        self._icon_name = icon_name
         self._label = label
         self._subtitle = subtitle
         self.setCheckable(True)
-        self.setMinimumSize(92, 72)
+        self.setMinimumSize(108, 80)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
 
@@ -87,7 +89,7 @@ class ProfileButton(QPushButton):
         active = self.isChecked()
         hover  = self.underMouse()
 
-        bg_rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
+        bg_rect = QRectF(1.0, 1.0, w - 2.0, h - 2.0)
         if active:
             bg_color     = QColor(pal.accent)
             border_color = QColor(pal.accent_dark)
@@ -100,19 +102,19 @@ class ProfileButton(QPushButton):
 
         p.setBrush(QBrush(bg_color))
         p.setPen(QPen(border_color, 1.5))
-        p.drawRoundedRect(bg_rect, 12, 12)
+        p.drawRoundedRect(bg_rect, 14, 14)
 
-        # Draw label
-        p.setFont(QFont("Inter", 9, QFont.Weight.Bold if active else QFont.Weight.DemiBold))
+        # Vector speedometer icon
+        icon_color = "#ffffff" if active else pal.accent
+        pix = render_svg_pixmap(self._icon_name, icon_color, 32)
+        icon_x = int((w - 32) / 2)
+        p.drawPixmap(icon_x, 10, pix)
+
+        # Label
+        p.setFont(QFont("Inter", 10, QFont.Weight.Bold if active else QFont.Weight.DemiBold))
         p.setPen(QColor("#ffffff") if active else QColor(pal.text_primary))
-        label_rect = QRectF(4, 18, w - 8, 20)
+        label_rect = QRectF(4, 48, w - 8, 24)
         p.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, self._label)
-
-        # Draw subtitle
-        p.setFont(QFont("Inter", 7, QFont.Weight.Normal))
-        p.setPen(QColor("#d8f3e5") if active else QColor(pal.text_muted))
-        sub_rect = QRectF(4, 40, w - 8, 16)
-        p.drawText(sub_rect, Qt.AlignmentFlag.AlignCenter, self._subtitle)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -141,14 +143,14 @@ class TempCell(QWidget):
             f"font-size: 10px; font-weight: 600; color: {pal.text_muted}; background: transparent; border: 0;"
         )
         self._val.setStyleSheet(
-            f"font-size: 18px; font-weight: 700; color: {pal.text_primary}; background: transparent; border: 0;"
+            f"font-size: 19px; font-weight: 700; color: {pal.text_primary}; background: transparent; border: 0;"
         )
 
     def set_value(self, celsius: int | None):
         if celsius is None or celsius == 0:
             self._val.setText("—")
         else:
-            self._val.setText(f"{celsius}°")
+            self._val.setText(f"{celsius}°C")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,7 +183,7 @@ class HomeTab(QWidget):
         # Page heading
         heading_box = QVBoxLayout()
         heading_box.setSpacing(3)
-        self.h_title = QLabel("Управление системой")
+        self.h_title = QLabel("Вас приветствует AcerSense")
         self.h_sub = QLabel("Режимы энергопотребления и аппаратный контроль Acer")
         heading_box.addWidget(self.h_title)
         heading_box.addWidget(self.h_sub)
@@ -194,7 +196,7 @@ class HomeTab(QWidget):
         pc_layout.setSpacing(12)
 
         sec_header = QHBoxLayout()
-        self.sec_title = QLabel("⚡  Режим использования системы")
+        self.sec_title = QLabel("Режим использования системы")
         self.fn_badge = QLabel("Fn + F")
         sec_header.addWidget(self.sec_title)
         sec_header.addStretch()
@@ -202,13 +204,13 @@ class HomeTab(QWidget):
         pc_layout.addLayout(sec_header)
 
         btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
+        btn_row.setSpacing(10)
         self.profile_group = QButtonGroup(self)
         self._profile_buttons: dict[str, ProfileButton] = {}
         curr_profile = get_power_profile()
 
-        for mode, label, sub in _PROFILE_MODES:
-            btn = ProfileButton(mode, label, sub)
+        for mode, icon_name, label, sub in _PROFILE_MODES:
+            btn = ProfileButton(mode, icon_name, label, sub)
             btn.setChecked(mode == curr_profile)
             btn.clicked.connect(lambda _, m=mode: self._on_profile_clicked(m))
             self.profile_group.addButton(btn)
@@ -219,7 +221,7 @@ class HomeTab(QWidget):
 
         self.hint_frame = QFrame()
         hint_lo = QVBoxLayout(self.hint_frame)
-        hint_lo.setContentsMargins(12, 9, 12, 9)
+        hint_lo.setContentsMargins(14, 10, 14, 10)
         self.mode_hint = QLabel(_PROFILE_HINTS.get(curr_profile, ""))
         self.mode_hint.setWordWrap(True)
         hint_lo.addWidget(self.mode_hint)
@@ -244,7 +246,7 @@ class HomeTab(QWidget):
 
         right_w = QWidget()
         right_w.setLayout(right)
-        right_w.setFixedWidth(300)
+        right_w.setFixedWidth(310)
 
         root.addWidget(left_w, 1)
         root.addWidget(right_w)
@@ -268,20 +270,20 @@ class HomeTab(QWidget):
         lo.setContentsMargins(16, 14, 16, 16)
         lo.setSpacing(12)
 
-        self.stats_title = QLabel("📊  Рабочие параметры")
+        self.stats_title = QLabel("Обзор рабочих параметров")
         lo.addWidget(self.stats_title)
 
         grid = QGridLayout()
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(6)
 
-        self.ram_ring = RingProgress(54)
-        self.cpu_ring = RingProgress(54)
+        self.ram_ring = RingProgress(58)
+        self.cpu_ring = RingProgress(58)
         grid.addWidget(self.ram_ring, 1, 0, Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.cpu_ring, 1, 1, Qt.AlignmentFlag.AlignCenter)
 
-        self.cpu_temp_cell = TempCell("ЦП °C")
-        self.gpu_temp_cell = TempCell("GPU °C")
+        self.cpu_temp_cell = TempCell("ЦП")
+        self.gpu_temp_cell = TempCell("GPU")
         grid.addWidget(self.cpu_temp_cell, 1, 2, Qt.AlignmentFlag.AlignCenter)
         grid.addWidget(self.gpu_temp_cell, 1, 3, Qt.AlignmentFlag.AlignCenter)
 
@@ -303,7 +305,7 @@ class HomeTab(QWidget):
         lo.setContentsMargins(16, 14, 16, 14)
         lo.setSpacing(8)
 
-        self.bat_title = QLabel("🔋  Состояние аккумулятора")
+        self.bat_title = QLabel("Состояние аккумулятора")
         lo.addWidget(self.bat_title)
 
         bat_row = QHBoxLayout()
@@ -317,13 +319,13 @@ class HomeTab(QWidget):
 
         self.opt_badge = QFrame()
         bl = QHBoxLayout(self.opt_badge)
-        bl.setContentsMargins(8, 4, 8, 4)
-        self.badge_text = QLabel("🛡️  Оптимизированная зарядка (80%)")
+        bl.setContentsMargins(8, 5, 8, 5)
+        self.badge_text = QLabel("Оптимизированная зарядка аккум. (80%)")
         bl.addWidget(self.badge_text)
         self.opt_badge.hide()
         lo.addWidget(self.opt_badge)
 
-        self.btn_battery_details = QPushButton("Детальные сведения об аккумуляторе →")
+        self.btn_battery_details = QPushButton("Информация о состоянии аккумулятора >")
         self.btn_battery_details.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_battery_details.clicked.connect(self._open_battery_info)
         lo.addWidget(self.btn_battery_details)
@@ -338,11 +340,11 @@ class HomeTab(QWidget):
         self.stats_card.setStyleSheet(card_style)
         self.battery_card.setStyleSheet(card_style)
 
-        self.h_title.setStyleSheet(f"font-size: 19px; font-weight: 700; color: {pal.text_primary}; background: transparent;")
+        self.h_title.setStyleSheet(f"font-size: 20px; font-weight: 700; color: {pal.text_primary}; background: transparent;")
         self.h_sub.setStyleSheet(f"font-size: 11px; color: {pal.text_muted}; background: transparent;")
         self.sec_title.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {pal.text_primary}; border: 0; background: transparent;")
-        self.stats_title.setStyleSheet(f"font-size: 12px; font-weight: 700; color: {pal.text_primary}; border: 0; background: transparent;")
-        self.bat_title.setStyleSheet(f"font-size: 12px; font-weight: 700; color: {pal.text_primary}; border: 0; background: transparent;")
+        self.stats_title.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {pal.text_primary}; border: 0; background: transparent;")
+        self.bat_title.setStyleSheet(f"font-size: 13px; font-weight: 700; color: {pal.text_primary}; border: 0; background: transparent;")
 
         self.fn_badge.setStyleSheet(
             f"font-size: 10px; font-weight: 700; color: {pal.accent}; background: {pal.accent_subtle};"
@@ -354,7 +356,7 @@ class HomeTab(QWidget):
         self.mode_hint.setStyleSheet(f"font-size: 11px; color: {pal.text_secondary}; line-height: 1.4; border: 0; background: transparent;")
 
         self.battery_pct.setStyleSheet(f"font-size: 28px; font-weight: 700; color: {pal.accent}; border: 0; background: transparent;")
-        self.battery_status_lbl.setStyleSheet(f"font-size: 10px; color: {pal.text_muted}; border: 0; background: transparent; padding-top: 8px;")
+        self.battery_status_lbl.setStyleSheet(f"font-size: 11px; color: {pal.text_muted}; border: 0; background: transparent; padding-top: 6px;")
 
         self.opt_badge.setStyleSheet(
             f"background: {pal.accent_subtle}; border: 1px solid {pal.badge_border}; border-radius: 8px;"

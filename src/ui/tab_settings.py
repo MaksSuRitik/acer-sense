@@ -1,4 +1,4 @@
-"""Settings tab — with Theme Switcher, Minimal Icons, and Dynamic Theme Updates."""
+"""Settings tab — matching official AcerSense layout with vector category icons and no text emojis."""
 from __future__ import annotations
 
 import shutil
@@ -13,6 +13,7 @@ from core.battery_daemon import trigger_battery_monitor
 from core.config import load_config, save_config
 from core.ec_control import set_charge_limit
 from core.power import get_power_profile, set_power_profile
+from ui.icons import render_svg_pixmap
 from ui.theme import ThemePalette, theme_manager
 from ui.toggle import ToggleSwitch
 
@@ -25,6 +26,7 @@ class SettingsTab(QWidget):
         self._hyprland_available: bool | None = None
         self._cards: list[QFrame] = []
         self._radio_frames: list[tuple[QFrame, QRadioButton, QLabel]] = []
+        self._section_icons: list[tuple[QLabel, str]] = []
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(20, 16, 20, 20)
@@ -66,7 +68,7 @@ class SettingsTab(QWidget):
 
     def _build_sidebar(self) -> QFrame:
         self.nav_panel = QFrame()
-        self.nav_panel.setFixedWidth(206)
+        self.nav_panel.setFixedWidth(216)
         self.nav_panel.setObjectName("navPanel")
 
         lo = QVBoxLayout(self.nav_panel)
@@ -78,11 +80,11 @@ class SettingsTab(QWidget):
         lo.addWidget(self.sidebar_title)
 
         self.nav_group = QButtonGroup(self.nav_panel)
-        self.btn_nav_power   = self._nav_button("⚡  Режим системы")
-        self.btn_nav_battery = self._nav_button("🔋  Аккумулятор")
-        self.btn_nav_screen  = self._nav_button("🖥️  Экран и защита")
-        self.btn_nav_hypr    = self._nav_button("⌨️  Горячие клавиши")
-        self.btn_nav_theme   = self._nav_button("🎨  Внешний вид")
+        self.btn_nav_power   = self._nav_button("Режим использования системы")
+        self.btn_nav_battery = self._nav_button("Аккумулятор и зарядка через USB")
+        self.btn_nav_screen  = self._nav_button("Экран")
+        self.btn_nav_hypr    = self._nav_button("Горячие клавиши (Hyprland)")
+        self.btn_nav_theme   = self._nav_button("Внешний вид и тема")
 
         self.btn_nav_power.clicked.connect(
             lambda: self._show_section(self.power_card, self.btn_nav_power))
@@ -111,20 +113,33 @@ class SettingsTab(QWidget):
 
     # ── Card template ──────────────────────────────────────────────────────
 
-    def _section_card(self, title: str, subtitle: str = "") -> QFrame:
+    def _section_card(self, icon_name: str, title: str, subtitle: str = "") -> QFrame:
         card = QFrame()
         self._cards.append(card)
         section = QVBoxLayout(card)
         section.setContentsMargins(20, 16, 20, 16)
         section.setSpacing(10)
 
+        # Header row: circular vector icon + title
+        h_row = QHBoxLayout()
+        h_row.setSpacing(8)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(28, 28)
+        self._section_icons.append((icon_lbl, icon_name))
+        h_row.addWidget(icon_lbl)
+
         heading = QLabel(title)
         heading.setObjectName("sectionHeading")
+        h_row.addWidget(heading)
+        h_row.addStretch()
+        section.addLayout(h_row)
+
         rule = QFrame()
         rule.setFixedHeight(1)
         rule.setObjectName("sectionRule")
-        section.addWidget(heading)
         section.addWidget(rule)
+
         if subtitle:
             intro = QLabel(subtitle)
             intro.setWordWrap(True)
@@ -139,7 +154,7 @@ class SettingsTab(QWidget):
         row_frame = QFrame()
         row_frame.setObjectName("radioRow")
         row_lo = QVBoxLayout(row_frame)
-        row_lo.setContentsMargins(12, 10, 12, 10)
+        row_lo.setContentsMargins(14, 10, 14, 10)
         row_lo.setSpacing(3)
 
         radio = QRadioButton(title)
@@ -162,20 +177,21 @@ class SettingsTab(QWidget):
 
     def _build_power_card(self) -> QFrame:
         card = self._section_card(
-            "⚡  Режим использования системы",
-            "Режимы производительности и охлаждения. Переключение комбинацией: Fn + F."
+            "speedo_circle",
+            "Режим использования системы",
+            "Эта настройка предлагает разные режимы использования для следующих сценариев. Вы можете изменить режимы в любое время, нажав клавиши Fn+F."
         )
         group = QButtonGroup(card)
         current = get_power_profile()
         for title, description, profile in (
-            ("🍃  Бесшумно (Энергосбережение)",
-             "Ограничение частот процессора и тихий вентилятор для работы от батареи.",
+            ("Бесшумно",
+             "Для веб-сайтов или онлайн-бесед.",
              "power-saver"),
-            ("⚖️  Обычный (Сбалансированный)",
-             "Сбалансированная работа для повседневных офисных задач, сёрфинга и видео.",
+            ("Обычный",
+             "Для работы, например, с Microsoft Office.",
              "balanced"),
-            ("🚀  Производительность (Максимум)",
-             "Максимальная вычислительная мощность для игр, компиляции и рендеринга.",
+            ("Производительность",
+             "Для ресурсоемких игр, рендеринга, потоковой передачи или работы с видео.",
              "performance"),
         ):
             radio = self._radio_option(
@@ -190,30 +206,31 @@ class SettingsTab(QWidget):
 
     def _build_battery_card(self) -> QFrame:
         card = self._section_card(
-            "🔋  Аккумулятор и зарядка",
-            "Управление порогом зарядки для сохранения ресурса аккумулятора."
+            "battery_circle",
+            "Аккумулятор и зарядка через USB",
+            "Режим заряда аккумулятора"
         )
         group = QButtonGroup(card)
         limit = self.config.get("charge_limit", 100)
 
         radio_80 = self._radio_option(
             card,
-            "🛡️  Оптимизированная зарядка (80%)",
-            "(Рекомендуется) Аккумулятор заряжается до 80%, после чего зарядка отключается для продления ресурса ячеек.",
+            "Оптимизированная зарядка аккум.",
+            "(Рекомендуется) Для продления срока службы аккумулятора он будет заряжен только до 80% емкости.",
             limit == 80,
             lambda: self._set_charge_limit(80),
         )
         radio_100 = self._radio_option(
             card,
-            "⚡  Зарядка до полной ёмкости (100%)",
-            "Зарядка до 100% для максимального времени автономной работы ноутбука.",
+            "Зарядка аккум. до полной емкости",
+            "Зарядка до максимальной емкости для более долгого использования в мобильном режиме.",
             limit != 80,
             lambda: self._set_charge_limit(100),
         )
         group.addButton(radio_80)
         group.addButton(radio_100)
 
-        self.btn_details = QPushButton("Детальные сведения об аккумуляторе →")
+        self.btn_details = QPushButton("См. дополнительную информацию о состоянии аккумулятора >")
         self.btn_details.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_details.clicked.connect(self._open_battery_info)
         card.layout().addWidget(self.btn_details)
@@ -228,7 +245,7 @@ class SettingsTab(QWidget):
         usb_info = QVBoxLayout()
         self.usb_title = QLabel("Зарядка через USB при выключенном питании")
         self.usb_text = QLabel(
-            "Позволяет заряжать смартфоны от USB даже при выключенном ноутбуке."
+            "Заряжайте мобильные устройства через выделенный разъем USB, даже когда ноутбук выключен."
         )
         self.usb_text.setWordWrap(True)
         usb_info.addWidget(self.usb_title)
@@ -247,14 +264,13 @@ class SettingsTab(QWidget):
     # ── Section: Screen (BluelightShield) ───────────────────────────────────
 
     def _build_screen_card(self) -> QFrame:
-        card = self._section_card("🖥️  Экран и защита зрения (BluelightShield)")
+        card = self._section_card("display", "Экран")
 
         top_row = QHBoxLayout()
         info_col = QVBoxLayout()
-        self.bl_title = QLabel("Acer BluelightShield")
+        self.bl_title = QLabel("BluelightShield")
         self.bl_desc = QLabel(
-            "Снижает уровень синего излучения дисплея, предотвращая усталость глаз.\n"
-            "Использует hyprsunset или wlsunset в Wayland-сессии."
+            "Примените настройки Acer BluelightShield, чтобы защитить глаза от синего спектра света."
         )
         self.bl_desc.setWordWrap(True)
         info_col.addWidget(self.bl_title)
@@ -326,7 +342,8 @@ class SettingsTab(QWidget):
         from core.hyprland import detect_hyprland, has_keybinds
 
         card = self._section_card(
-            "⌨️  Горячие клавиши (Hyprland)",
+            "keyboard",
+            "Горячие клавиши (Hyprland)",
             "Автоматическая привязка клавиши переключения микрофона и смены профилей питания."
         )
 
@@ -371,7 +388,8 @@ class SettingsTab(QWidget):
 
     def _build_theme_card(self) -> QFrame:
         card = self._section_card(
-            "🎨  Внешний вид и тема оформления",
+            "theme_palette",
+            "Внешний вид и тема оформления",
             "Выберите тему интерфейса. Режим 'Системная' автоматически подстраивается под настройки окружения."
         )
         group = QButtonGroup(card)
@@ -379,21 +397,21 @@ class SettingsTab(QWidget):
 
         radio_light = self._radio_option(
             card,
-            "☀️  Светлая тема",
+            "Светлая тема",
             "Классический светлый интерфейс с высокой контрастностью.",
             current_theme == "light",
             lambda: self._set_theme("light"),
         )
         radio_dark = self._radio_option(
             card,
-            "🌙  Тёмная тема",
+            "Тёмная тема",
             "Глубокая тёмно-изумрудная тема, снижающая нагрузку на глаза ночью.",
             current_theme == "dark",
             lambda: self._set_theme("dark"),
         )
         radio_system = self._radio_option(
             card,
-            "🖥️  Системная тема",
+            "Системная тема",
             "Автоматический подхват тёмной или светлой темы из настроек рабочего стола.",
             current_theme == "system",
             lambda: self._set_theme("system"),
@@ -415,7 +433,7 @@ class SettingsTab(QWidget):
             }}
         """)
         self.sidebar_title.setStyleSheet(
-            f"font-size: 12px; font-weight: 700; color: {pal.text_primary}; margin-bottom: 6px; background: transparent;"
+            f"font-size: 13px; font-weight: 700; color: {pal.text_primary}; margin-bottom: 6px; background: transparent;"
         )
 
         nav_ss = f"""
@@ -433,6 +451,10 @@ class SettingsTab(QWidget):
         for btn in (self.btn_nav_power, self.btn_nav_battery, self.btn_nav_screen,
                     self.btn_nav_hypr, self.btn_nav_theme):
             btn.setStyleSheet(nav_ss)
+
+        for icon_lbl, icon_name in self._section_icons:
+            pix = render_svg_pixmap(icon_name, pal.accent, 26)
+            icon_lbl.setPixmap(pix)
 
         for card in self._cards:
             card.setStyleSheet(f"background: {pal.bg_card}; border: 1px solid {pal.border}; border-radius: 16px;")
@@ -469,12 +491,12 @@ class SettingsTab(QWidget):
                     background: {pal.bg_card};
                 }}
                 QRadioButton::indicator:checked {{
-                    border: 4px solid {pal.accent};
+                    border: 4.5px solid {pal.accent};
                     background: {pal.bg_card};
                 }}
                 QRadioButton::indicator:hover {{ border-color: {pal.accent}; }}
             """)
-            desc.setStyleSheet(f"font-size: 10px; color: {pal.text_muted}; margin-left: 24px; background: transparent; border: 0;")
+            desc.setStyleSheet(f"font-size: 11px; color: {pal.text_muted}; margin-left: 24px; background: transparent; border: 0;")
 
         self.btn_details.setStyleSheet(f"""
             QPushButton {{
@@ -485,10 +507,10 @@ class SettingsTab(QWidget):
         """)
 
         self.usb_title.setStyleSheet(f"font-size: 12px; color: {pal.text_primary}; font-weight: 600; background: transparent; border: 0;")
-        self.usb_text.setStyleSheet(f"font-size: 10px; color: {pal.text_muted}; background: transparent; border: 0;")
+        self.usb_text.setStyleSheet(f"font-size: 11px; color: {pal.text_muted}; background: transparent; border: 0;")
 
         self.bl_title.setStyleSheet(f"font-size: 13px; color: {pal.text_primary}; font-weight: 700; background: transparent; border: 0;")
-        self.bl_desc.setStyleSheet(f"font-size: 10px; color: {pal.text_muted}; background: transparent; border: 0;")
+        self.bl_desc.setStyleSheet(f"font-size: 11px; color: {pal.text_muted}; background: transparent; border: 0;")
         self.preset_title.setStyleSheet(f"font-size: 11px; font-weight: 700; color: {pal.text_secondary}; background: transparent; border: 0;")
 
         for btn in self._preset_buttons.values():

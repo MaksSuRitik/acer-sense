@@ -113,7 +113,7 @@ class SystemInfoDialog(DetailsDialog):
             ("Операционная система", info.get("os_pretty", "Linux")),
             ("Версия ядра",       info.get("kernel", "—")),
         ]
-        super().__init__("ℹ️  Сведения о системе", rows, parent)
+        super().__init__("Сведения о системе", rows, parent)
 
 
 class BatteryInfoDialog(DetailsDialog):
@@ -132,4 +132,4 @@ class BatteryInfoDialog(DetailsDialog):
             ("Температура аккумулятора", temp),
             ("Статус контроллера",    info.get("status", "—")),
         ]
-        super().__init__("🔋  Сведения об аккумуляторе", rows, parent)
+        super().__init__("Сведения об аккумуляторе", rows, parent)

@@ -1,4 +1,4 @@
-"""Diagnostics tab — deep hardware testing, minimal icons, and light/dark theme support."""
+"""Diagnostics tab — matching official AcerSense layout with vector icons and deep tests."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,6 +7,7 @@ import threading
 import webbrowser
 
 from PyQt6.QtCore import QThread, Qt, pyqtSignal
+from PyQt6.QtGui import QIcon, QPixmap
 from PyQt6.QtWidgets import (QDialog, QDialogButtonBox, QFrame, QHBoxLayout,
                               QLabel, QMessageBox, QProgressBar, QPushButton,
                               QScrollArea, QTextEdit, QVBoxLayout, QWidget)
@@ -16,6 +17,7 @@ from core.sensors import get_battery_info, get_ram_info
 from core.storage import get_physical_drives
 from core.trash import empty_trash, format_size, get_trash_stats
 from ui.details_dialogs import SystemInfoDialog
+from ui.icons import render_svg_pixmap
 from ui.theme import ThemePalette, theme_manager
 
 STATUS_STYLE = {
@@ -77,16 +79,16 @@ class BatteryCalibrationDialog(QDialog):
             QLabel {{ color: {pal.text_primary}; }}
             QTextEdit {{ background: {pal.bg_card}; border: 1px solid {pal.border}; border-radius: 8px;
                         color: {pal.text_secondary}; font-size: 11px; }}
-            QPushButton {{ min-width: 88px; padding: 7px 14px;
+            QPushButton {{ min-width: 88px; padding: 7px 16px;
                           border: 1px solid {pal.border}; border-radius: 12px;
-                          color: {pal.accent}; background: {pal.bg_card}; }}
+                          color: {pal.accent}; background: {pal.bg_card}; font-weight: 600; }}
             QPushButton:hover {{ background: {pal.tab_hover}; border-color: {pal.accent}; }}
         """)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 18, 22, 16)
         layout.setSpacing(12)
 
-        title = QLabel("🔋  Калибровка аккумулятора")
+        title = QLabel("Калибровка аккумулятора")
         title.setStyleSheet(f"font-size: 16px; font-weight: 700; color: {pal.text_primary};")
         layout.addWidget(title)
 
@@ -120,8 +122,6 @@ class BatteryCalibrationDialog(QDialog):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CheckupTab(QWidget):
-    """Hardware diagnostics tab with deep multi-pass tests and theme support."""
-
     def __init__(self):
         super().__init__()
         self.cards: dict[str, dict] = {}
@@ -129,7 +129,7 @@ class CheckupTab(QWidget):
         self.active_card_ids: list[str] = []
         self.drives = get_physical_drives()
         self._all_card_frames: list[QFrame] = []
-        self._all_badges: list[QLabel] = []
+        self._icon_labels: list[tuple[QLabel, str]] = []
         self._all_progress_bars: list[QProgressBar] = []
 
         scroll = QScrollArea()
@@ -170,7 +170,7 @@ class CheckupTab(QWidget):
 
         side_holder = QWidget()
         side_holder.setLayout(side_column)
-        side_holder.setFixedWidth(268)
+        side_holder.setFixedWidth(272)
 
         outer.addWidget(main_holder, 1)
         outer.addWidget(side_holder)
@@ -192,19 +192,18 @@ class CheckupTab(QWidget):
         left = QVBoxLayout()
         left.setSpacing(8)
 
-        self.header_title = QLabel("🩺  Диагностика оборудования")
+        self.header_title = QLabel("Проверить")
         left.addWidget(self.header_title)
 
-        self.btn_check_all = QPushButton("🔍  Проверить всё")
+        self.btn_check_all = QPushButton("Проверить все")
         self.btn_check_all.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_check_all.setFixedHeight(36)
+        self.btn_check_all.setFixedHeight(38)
         self.btn_check_all.clicked.connect(self.check_all)
         left.addWidget(self.btn_check_all)
         header.addLayout(left)
 
         self.header_desc = QLabel(
-            "Глубокая аппаратная проверка компонентов:\n"
-            "аккумулятор, SMART-накопители, многопроходный тест ОЗУ, термостабильность CPU и GPU."
+            "Проверка работоспособности компонентов, включая аккумулятор, накопители и RAM."
         )
         self.header_desc.setWordWrap(True)
         header.addWidget(self.header_desc, 1)
@@ -214,15 +213,15 @@ class CheckupTab(QWidget):
         links_layout.setSpacing(6)
 
         self.sys_info_link = QLabel(
-            f"<a href='sysinfo' style='color:{theme_manager.palette.accent};text-decoration:none;"
-            "font-size:11px;font-weight:600;'>ℹ️  Сведения о системе</a>"
+            f"<a href='sysinfo' style='text-decoration:none;font-size:11px;font-weight:600;'>"
+            "Сведения о системе ></a>"
         )
         self.sys_info_link.setOpenExternalLinks(False)
         self.sys_info_link.linkActivated.connect(self.open_system_info)
 
         self.support_link = QLabel(
-            f"<a href='support' style='color:{theme_manager.palette.accent};text-decoration:none;"
-            "font-size:11px;font-weight:600;'>🌐  Техническая поддержка</a>"
+            f"<a href='support' style='text-decoration:none;font-size:11px;font-weight:600;'>"
+            "Техническая поддержка ></a>"
         )
         self.support_link.setOpenExternalLinks(False)
         self.support_link.linkActivated.connect(lambda: webbrowser.open(ACER_SUPPORT_URL))
@@ -257,7 +256,7 @@ class CheckupTab(QWidget):
         """)
         return bar
 
-    def _add_card(self, target: QVBoxLayout, card_id: str, badge: str, title: str,
+    def _add_card(self, target: QVBoxLayout, card_id: str, icon_name: str, title: str,
                   overview_widget: QWidget | None, payload: dict | None = None):
         card = self._card_frame()
         card_layout = QHBoxLayout(card)
@@ -268,20 +267,29 @@ class CheckupTab(QWidget):
         left.setSpacing(6)
         left.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        badge_lbl = QLabel(badge)
-        badge_lbl.setObjectName("categoryBadge")
-        badge_lbl.setFixedHeight(22)
-        self._all_badges.append(badge_lbl)
+        # Header row: circular vector icon + title
+        h_row = QHBoxLayout()
+        h_row.setSpacing(8)
+
+        icon_lbl = QLabel()
+        icon_lbl.setFixedSize(28, 28)
+        self._icon_labels.append((icon_lbl, icon_name))
+        h_row.addWidget(icon_lbl)
 
         heading = QLabel(title)
         heading.setObjectName("cardHeading")
+        h_row.addWidget(heading)
+        h_row.addStretch()
+        left.addLayout(h_row)
 
         rule = QFrame()
         rule.setFixedHeight(1)
         rule.setObjectName("cardRule")
+        left.addWidget(rule)
 
         status = QLabel("Не проверено")
         status.setObjectName("cardStatus")
+        left.addWidget(status)
 
         progress = QProgressBar()
         progress.setRange(0, 100)
@@ -289,21 +297,16 @@ class CheckupTab(QWidget):
         progress.setFixedHeight(4)
         progress.hide()
         self._all_progress_bars.append(progress)
+        left.addWidget(progress)
 
         btn = QPushButton("Проверить")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setFixedSize(110, 28)
         btn.setObjectName("cardButton")
+        left.addWidget(btn)
 
         checked_at = QLabel("Последняя проверка: —")
         checked_at.setObjectName("cardDate")
-
-        left.addWidget(badge_lbl)
-        left.addWidget(heading)
-        left.addWidget(rule)
-        left.addWidget(status)
-        left.addWidget(progress)
-        left.addWidget(btn)
         left.addWidget(checked_at)
         left.addStretch(1)
 
@@ -333,7 +336,7 @@ class CheckupTab(QWidget):
         dv.setSpacing(6)
 
         def _row(label: str, value: str):
-            lbl = QLabel(f"<b>{label}</b>")
+            lbl = QLabel(label)
             lbl.setObjectName("detailLabel")
             dv.addWidget(lbl)
             if charge is not None and "Заряд" in label:
@@ -346,16 +349,16 @@ class CheckupTab(QWidget):
         if temp is not None:
             _row("Температура", f"{temp}°C")
         if cycles is not None:
-            _row("Количество циклов заряда", str(cycles))
+            _row("Количество циклов", str(cycles))
 
-        btn_card_details = QPushButton("Детальные сведения об аккумуляторе →")
+        btn_card_details = QPushButton("Информация о состоянии аккумулятора >")
         btn_card_details.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_card_details.setObjectName("textActionBtn")
         btn_card_details.clicked.connect(self._open_battery_info)
         dv.addWidget(btn_card_details)
         dv.addStretch(1)
 
-        self._add_card(target, "battery", "🔋  АККУМУЛЯТОР", "Аккумулятор", detail)
+        self._add_card(target, "battery", "battery_circle", "Аккумулятор", detail)
 
     def _add_drive_card(self, target: QVBoxLayout, card_id: str, drive: dict):
         detail = QFrame()
@@ -369,12 +372,12 @@ class CheckupTab(QWidget):
             mount_lbl.setObjectName("detailLabel")
             dv.addWidget(mount_lbl)
             dv.addWidget(self._colored_bar(int(part["percent"])))
-            info = QLabel(f"Свободно {part['free_gb']} ГБ из {part['total_gb']} ГБ")
+            info = QLabel(f"осталось {part['free_gb']} GB, всего {part['total_gb']} GB")
             info.setObjectName("detailValue")
             dv.addWidget(info)
         dv.addStretch(1)
 
-        self._add_card(target, card_id, "💾  НАКОПИТЕЛЬ", drive["model"], detail, drive)
+        self._add_card(target, card_id, "ssd", drive["model"], detail, drive)
 
     def _add_memory_card(self, target: QVBoxLayout):
         memory = get_ram_info()
@@ -398,7 +401,7 @@ class CheckupTab(QWidget):
         dv.addWidget(note)
         dv.addStretch(1)
 
-        self._add_card(target, "memory", "🧠  ОПЕРАТИВНАЯ ПАМЯТЬ", "Оперативная память", detail)
+        self._add_card(target, "memory", "ram", "ОЗУ", detail)
 
     def _add_system_card(self, target: QVBoxLayout):
         detail = QFrame()
@@ -417,7 +420,7 @@ class CheckupTab(QWidget):
         note.setObjectName("detailValue")
         dv.addWidget(note)
         dv.addStretch(1)
-        self._add_card(target, "system", "❄️  ОХЛАЖДЕНИЕ", "Система и охлаждение", detail)
+        self._add_card(target, "system", "cooling", "Охлаждение и система", detail)
 
     # ── Side cards ───────────────────────────────────────────────────────────
 
@@ -432,7 +435,7 @@ class CheckupTab(QWidget):
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(8)
 
-        title = QLabel("🔋  Оптимизация аккумулятора")
+        title = QLabel("Оптимизировать аккумулятор")
         title.setObjectName("sideCardTitle")
         layout.addWidget(title)
 
@@ -447,7 +450,7 @@ class CheckupTab(QWidget):
         sep.setObjectName("cardRule")
         layout.addWidget(sep)
 
-        btn_details = QPushButton("Детальные сведения →")
+        btn_details = QPushButton("Режим заряда аккумулятора >")
         btn_details.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_details.setObjectName("textActionBtn")
         btn_details.clicked.connect(self._open_battery_info)
@@ -460,11 +463,11 @@ class CheckupTab(QWidget):
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(8)
 
-        title = QLabel("🧹  Очистить хранилище")
+        title = QLabel("Оптимизировать хранилище")
         title.setObjectName("sideCardTitle")
         layout.addWidget(title)
 
-        btn = QPushButton("Быстрая очистка корзины")
+        btn = QPushButton("Быстрая очистка")
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setObjectName("sideCardBtn")
         btn.clicked.connect(self.cleanup_trash)
@@ -484,11 +487,11 @@ class CheckupTab(QWidget):
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(8)
 
-        title = QLabel("ℹ️  Сведения о системе")
+        title = QLabel("Сведения о системе")
         title.setObjectName("sideCardTitle")
         layout.addWidget(title)
 
-        text = QLabel("Версия ядра, дистрибутив, компоненты железа, драйверы.")
+        text = QLabel("Версия ОС, ядра, комплектующие ноутбука, драйверы.")
         text.setWordWrap(True)
         text.setObjectName("detailValue")
         layout.addWidget(text)
@@ -506,12 +509,16 @@ class CheckupTab(QWidget):
         self.header_title.setStyleSheet(f"font-size: 15px; font-weight: 700; color: {pal.text_primary};")
         self.header_desc.setStyleSheet(f"font-size: 11px; line-height: 1.4; color: {pal.text_muted}; padding-top: 4px;")
 
+        # "Проверить все" button with vector icon
+        icon_pix = render_svg_pixmap("heart_check", "#ffffff", 20)
+        self.btn_check_all.setIcon(QIcon(icon_pix))
+        self.btn_check_all.setIconSize(icon_pix.size())
         self.btn_check_all.setStyleSheet(f"""
             QPushButton {{
                 background: {pal.accent};
                 color: #ffffff;
                 border: none;
-                border-radius: 10px;
+                border-radius: 12px;
                 font-size: 12px;
                 font-weight: 700;
                 padding: 0 20px;
@@ -522,6 +529,11 @@ class CheckupTab(QWidget):
 
         self.sys_info_link.setStyleSheet(f"color: {pal.accent}; font-size: 11px; font-weight: 600;")
         self.support_link.setStyleSheet(f"color: {pal.accent}; font-size: 11px; font-weight: 600;")
+
+        # Render all circular card vector icons
+        for icon_lbl, icon_name in self._icon_labels:
+            pix = render_svg_pixmap(icon_name, pal.accent, 26)
+            icon_lbl.setPixmap(pix)
 
         for card in self._all_card_frames:
             card.setStyleSheet(f"""
@@ -569,13 +581,6 @@ class CheckupTab(QWidget):
                     QPushButton:hover {{ background: {pal.tab_hover}; border-color: {pal.accent}; }}
                     QPushButton:disabled {{ color: {pal.text_muted}; border-color: {pal.border_sub}; }}
                 """)
-
-        for badge in self._all_badges:
-            badge.setStyleSheet(f"""
-                font-size: 9px; font-weight: 700; letter-spacing: 0.6px;
-                color: {pal.accent}; background: {pal.badge_bg}; border: 1px solid {pal.badge_border};
-                border-radius: 4px; padding: 2px 8px;
-            """)
 
         for p_bar in self._all_progress_bars:
             p_bar.setStyleSheet(f"""
@@ -661,7 +666,7 @@ class CheckupTab(QWidget):
                 f"font-size: 12px; color: {theme_manager.palette.accent}; font-weight: 600; margin-top: 2px;"
             )
 
-        self.btn_check_all.setText("✕  Отменить")
+        self.btn_check_all.setText("Отменить")
         self.worker = DeepCheckWorker(tasks, parent=self)
         self.worker.progress_changed.connect(self.update_progress)
         self.worker.result_ready.connect(self.apply_result)
@@ -698,4 +703,4 @@ class CheckupTab(QWidget):
             c["progress"].hide()
         self.active_card_ids = []
         self.btn_check_all.setEnabled(True)
-        self.btn_check_all.setText("🔍  Проверить всё")
+        self.btn_check_all.setText("Проверить все")

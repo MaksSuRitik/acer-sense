@@ -1,14 +1,15 @@
-"""Acer Sense Main Application Window with Dark/Light Theme Support and Minimal Icons."""
+"""Acer Sense Main Window — native vector icons, theme awareness, matching official AcerSense."""
 from __future__ import annotations
 
 from pathlib import Path
 import subprocess
 
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
-from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPen
+from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPen
 from PyQt6.QtWidgets import (QHBoxLayout, QLabel, QMainWindow, QPushButton,
                               QTabWidget, QWidget)
 
+from .icons import render_svg_pixmap
 from .tab_checkup import CheckupTab
 from .tab_home import HomeTab
 from .tab_settings import SettingsTab
@@ -16,7 +17,7 @@ from .theme import ThemePalette, theme_manager
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Векторная кнопка микрофона с поддержкой тем
+# Круглая кнопка гарнитуры/микрофона (векторная иконка)
 # ──────────────────────────────────────────────────────────────────────────────
 
 class MicButton(QPushButton):
@@ -34,38 +35,28 @@ class MicButton(QPushButton):
         hover = self.underMouse()
         pressed = self.isDown()
 
+        # Background circle on hover
         if pressed:
             p.setBrush(QBrush(QColor(pal.accent_subtle)))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawRoundedRect(QRectF(2, 2, 32, 32), 16, 16)
+            p.setPen(QPen(QColor(pal.accent), 1.2))
+            p.drawEllipse(QRectF(2, 2, 32, 32))
         elif hover:
             p.setBrush(QBrush(QColor(pal.tab_hover)))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawRoundedRect(QRectF(2, 2, 32, 32), 16, 16)
+            p.setPen(QPen(QColor(pal.border), 1.2))
+            p.drawEllipse(QRectF(2, 2, 32, 32))
+        else:
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(pal.border), 1.0))
+            p.drawEllipse(QRectF(2, 2, 32, 32))
 
-        color = QColor(pal.accent if hover else pal.text_secondary)
-        pen = QPen(color, 2.0)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-        p.setPen(pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-
-        # Капсюль микрофона
-        p.drawRoundedRect(QRectF(14, 8, 8, 13), 4, 4)
-
-        # Дуга вокруг микрофона
-        arc_path = QPainterPath()
-        arc_path.arcMoveTo(QRectF(10.5, 12, 15, 12), 0)
-        arc_path.arcTo(QRectF(10.5, 12, 15, 12), 0, -180)
-        p.drawPath(arc_path)
-
-        # Ножка и основание
-        p.drawLine(QPointF(18, 24), QPointF(18, 28))
-        p.drawLine(QPointF(13, 28), QPointF(23, 28))
+        # Render vector headset icon
+        color = pal.accent if (hover or pressed) else pal.text_secondary
+        pix = render_svg_pixmap("headset", color, 20)
+        p.drawPixmap(8, 8, pix)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Векторная кнопка шестерёнки настроек (чёткая, адаптивная к темам)
+# Круглая кнопка настроек (векторная шестерёнка из официального AcerSense)
 # ──────────────────────────────────────────────────────────────────────────────
 
 class SettingsButton(QPushButton):
@@ -83,39 +74,28 @@ class SettingsButton(QPushButton):
         hover = self.underMouse()
         pressed = self.isDown()
 
+        # Background circle on hover
         if pressed:
             p.setBrush(QBrush(QColor(pal.accent_subtle)))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawRoundedRect(QRectF(2, 2, 32, 32), 16, 16)
+            p.setPen(QPen(QColor(pal.accent), 1.2))
+            p.drawEllipse(QRectF(2, 2, 32, 32))
         elif hover:
             p.setBrush(QBrush(QColor(pal.tab_hover)))
-            p.setPen(Qt.PenStyle.NoPen)
-            p.drawRoundedRect(QRectF(2, 2, 32, 32), 16, 16)
+            p.setPen(QPen(QColor(pal.border), 1.2))
+            p.drawEllipse(QRectF(2, 2, 32, 32))
+        else:
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QPen(QColor(pal.border), 1.0))
+            p.drawEllipse(QRectF(2, 2, 32, 32))
 
-        cx, cy = 18.0, 18.0
-        color = QColor(pal.accent if hover else pal.text_secondary)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QBrush(color))
-
-        # 8 зубцов шестерёнки
-        for i in range(8):
-            p.save()
-            p.translate(cx, cy)
-            p.rotate(i * 45)
-            p.drawRoundedRect(QRectF(-2.2, -9.5, 4.4, 4.0), 1.2, 1.2)
-            p.restore()
-
-        # Обод шестерёнки
-        p.drawEllipse(QPointF(cx, cy), 7.2, 7.2)
-
-        # Центральное отверстие
-        hole_color = QColor(pal.accent_subtle if pressed else (pal.tab_hover if hover else pal.bg_main))
-        p.setBrush(QBrush(hole_color))
-        p.drawEllipse(QPointF(cx, cy), 3.2, 3.2)
+        # Render vector gear icon
+        color = pal.accent if (hover or pressed) else pal.text_secondary
+        pix = render_svg_pixmap("gear", color, 20)
+        p.drawPixmap(8, 8, pix)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# MainWindow
+# Главное окно MainWindow
 # ──────────────────────────────────────────────────────────────────────────────
 
 class MainWindow(QMainWindow):
@@ -139,7 +119,7 @@ class MainWindow(QMainWindow):
         self.logo_brand.setStyleSheet(f"""
             color: {theme_manager.palette.accent};
             font-family: 'Inter', 'Arial', sans-serif;
-            font-size: 19px;
+            font-size: 20px;
             font-weight: 900;
             letter-spacing: -0.5px;
             background: transparent;
@@ -152,14 +132,14 @@ class MainWindow(QMainWindow):
             font-size: 10px;
             font-weight: 700;
             letter-spacing: 2.5px;
-            padding-top: 4px;
+            padding-top: 5px;
             background: transparent;
         """)
 
         logo_layout.addWidget(self.logo_brand)
         logo_layout.addWidget(self.logo_app)
 
-        # ── Кнопки действий справа ───────────────────────────────────────────
+        # ── Кнопки действий справа (круглые векторные) ────────────────────────
         self.btn_mic = MicButton()
         self.btn_mic.clicked.connect(self._toggle_mic)
 
@@ -169,21 +149,21 @@ class MainWindow(QMainWindow):
         right_widget = QWidget()
         right_layout = QHBoxLayout(right_widget)
         right_layout.setContentsMargins(0, 0, 16, 0)
-        right_layout.setSpacing(6)
+        right_layout.setSpacing(8)
         right_layout.addWidget(self.btn_mic)
         right_layout.addWidget(self.btn_settings)
 
         self.tabs.setCornerWidget(logo_widget, Qt.Corner.TopLeftCorner)
         self.tabs.setCornerWidget(right_widget, Qt.Corner.TopRightCorner)
 
-        # ── Вкладки с минималистичными иконками ──────────────────────────────
+        # ── Вкладки без текстовых эмодзи (чистая типографика AcerSense) ───────
         self.home_tab = HomeTab()
         self.checkup_tab = CheckupTab()
         self.settings_tab = SettingsTab()
 
-        self.tabs.addTab(self.home_tab, "⚡  Дом")
-        self.tabs.addTab(self.checkup_tab, "🩺  Проверить")
-        self.tabs.addTab(self.settings_tab, "⚙️  Персональные настройки")
+        self.tabs.addTab(self.home_tab, "Дом")
+        self.tabs.addTab(self.checkup_tab, "Проверить")
+        self.tabs.addTab(self.settings_tab, "Персональные настройки")
         self.setCentralWidget(self.tabs)
 
         theme_manager.theme_changed.connect(self._on_theme_changed)
@@ -192,7 +172,7 @@ class MainWindow(QMainWindow):
         self.logo_brand.setStyleSheet(f"""
             color: {pal.accent};
             font-family: 'Inter', 'Arial', sans-serif;
-            font-size: 19px;
+            font-size: 20px;
             font-weight: 900;
             letter-spacing: -0.5px;
             background: transparent;
@@ -203,7 +183,7 @@ class MainWindow(QMainWindow):
             font-size: 10px;
             font-weight: 700;
             letter-spacing: 2.5px;
-            padding-top: 4px;
+            padding-top: 5px;
             background: transparent;
         """)
         self.btn_mic.update()
