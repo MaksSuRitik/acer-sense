@@ -102,17 +102,7 @@ class DetailsDialog(QDialog):
 
 class SystemInfoDialog(DetailsDialog):
     def __init__(self, parent=None):
-        info = get_system_info()
-        rows = [
-            ("Модель ноутбука",   info.get("product_name", "Acer")),
-            ("Серийный номер",    info.get("serial_number", "—")),
-            ("Версия BIOS",       info.get("bios_version", "—")),
-            ("Процессор",         info.get("cpu_model", "—")),
-            ("Оперативная память",info.get("ram_total", "—")),
-            ("Графика",           info.get("gpu", "—")),
-            ("Операционная система", info.get("os_pretty", "Linux")),
-            ("Версия ядра",       info.get("kernel", "—")),
-        ]
+        rows = get_system_info()
         super().__init__("Сведения о системе", rows, parent)
 
 

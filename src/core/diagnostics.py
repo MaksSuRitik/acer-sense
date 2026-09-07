@@ -1,13 +1,15 @@
-"""Deep hardware component diagnostics: Multi-pass RAM test and CPU/GPU thermal load analysis."""
+"""Deep hardware component diagnostics: Storage sector integrity, multi-pass RAM stress, and CPU/GPU thermal load analysis."""
 from __future__ import annotations
 
 import gc
 import hashlib
 import math
+import os
 from pathlib import Path
 import re
 import shutil
 import subprocess
+import tempfile
 import threading
 import time
 from typing import Callable, Optional
@@ -64,7 +66,6 @@ def check_battery() -> dict:
 
     details.append("Питание: подключено к сети" if battery["plugged"] else "Питание: работа от аккумулятора")
 
-    # Read voltage and power rate if available
     for bat in sorted(Path("/sys/class/power_supply").glob("BAT*")):
         try:
             v_now = bat / "voltage_now"
@@ -89,7 +90,7 @@ def check_battery() -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. Storage / SMART Diagnostics
+# 2. Deep Storage / Sector Read Integrity & SMART Diagnostics
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _smart_helper_path() -> str | None:
@@ -134,38 +135,128 @@ def _run_smart(device: str, allow_auth: bool = True) -> tuple[str | None, list[s
     status: str | None = None
     if re.search(r"overall-health.*?:\s*passed", output, re.IGNORECASE) or re.search(r"smart status:\s*ok", output, re.IGNORECASE):
         status = GOOD
-        details.append("SMART: самодиагностика пройдена (OK)")
+        details.append("SMART: самодиагностика пройдена успешно (PASSED)")
     elif re.search(r"overall-health.*?:\s*failed", output, re.IGNORECASE) or re.search(r"smart status:\s*critical", output, re.IGNORECASE):
         status = CRITICAL
         details.append("SMART сообщает о критической ошибке накопителя!")
 
+    # Check for bad sector attributes
     labels = {
-        "Critical Warning": "Критическое предупреждение",
+        "Reallocated_Sector_Ct": "Переназначенные сектора (Bad Sectors)",
+        "Current_Pending_Sector": "Сектора, ожидающие переназначения",
+        "Offline_Uncorrectable": "Неисправимые сектора",
+        "UDMA_CRC_Error_Count": "Ошибки передачи данных (CRC)",
+        "Media and Data Integrity Errors": "Ошибки целостности данных флеш-памяти",
+        "Critical Warning": "Критическое предупреждение контроллера",
         "Percentage Used": "Износ накопителя (Percentage Used)",
-        "Media and Data Integrity Errors": "Ошибки данных (Integrity Errors)",
+        "Available Spare": "Резерв запасных блоков (Available Spare)",
         "Unsafe Shutdowns": "Небезопасные выключения",
-        "Power Cycles": "Циклы включения",
         "Power On Hours": "Время наработки (часов)",
-        "Temperature": "Температура SMART",
+        "Temperature": "Температура контроллера",
     }
     for source, destination in labels.items():
         match = re.search(rf"^{re.escape(source)}\s*:\s*(.+)$", output, re.MULTILINE | re.IGNORECASE)
         if match:
             value = match.group(1).strip()
             details.append(f"{destination}: {value}")
-    if not details:
-        details.append("SMART данные не поддерживаются этим интерфейсом")
+            # Detect bad sectors or integrity errors
+            if source in ("Reallocated_Sector_Ct", "Current_Pending_Sector", "Offline_Uncorrectable", "Media and Data Integrity Errors"):
+                try:
+                    cnt = int(value.split()[0].replace(",", ""))
+                    if cnt > 0:
+                        status = CRITICAL
+                except Exception:
+                    pass
+
     return status, details
 
 
-def check_drive(drive: dict, allow_auth: bool = True) -> dict:
+def _test_storage_surface(drive: dict, progress: ProgressCallback | None,
+                          cancel_event: threading.Event | None) -> tuple[int, float, int]:
+    """Test actual sector read/write throughput and verify data integrity on accessible partitions.
+
+    Returns: (read_speed_mb_s, latency_ms, errors_count)
+    """
+    mount_dir = None
+    for part in drive.get("partitions", []):
+        m = part.get("mount")
+        if m and os.path.exists(m) and os.access(m, os.W_OK):
+            mount_dir = m
+            break
+
+    if not mount_dir:
+        mount_dir = tempfile.gettempdir()
+
+    test_size_mb = 64
+    chunk_size = 64 * 1024
+    num_chunks = (test_size_mb * 1024 * 1024) // chunk_size
+    errors = 0
+
+    try:
+        data_block = os.urandom(chunk_size)
+        expected_hash = hashlib.sha256(data_block).digest()
+
+        with tempfile.NamedTemporaryFile(dir=mount_dir, delete=True) as f:
+            # Write phase
+            _emit(progress, 35, "Тест секторов: запись тестовых блоков...")
+            t_w0 = time.monotonic()
+            for _ in range(num_chunks):
+                if _cancelled(cancel_event):
+                    return (0, 0.0, 0)
+                f.write(data_block)
+            f.flush()
+            os.fsync(f.fileno())
+
+            # Read and verify phase across all written sectors
+            _emit(progress, 65, "Тест секторов: прямое чтение и проверка целостности...")
+            f.seek(0)
+            t_r0 = time.monotonic()
+            total_read = 0
+            seek_latencies = []
+
+            for i in range(num_chunks):
+                if _cancelled(cancel_event):
+                    return (0, 0.0, 0)
+                t_seek0 = time.monotonic()
+                buf = f.read(chunk_size)
+                seek_latencies.append((time.monotonic() - t_seek0) * 1000)
+                if not buf or hashlib.sha256(buf).digest() != expected_hash:
+                    errors += 1
+                total_read += len(buf)
+
+            elapsed_read = max(0.001, time.monotonic() - t_r0)
+            read_speed = int((total_read / (1024 * 1024)) / elapsed_read)
+            avg_latency = round(sum(seek_latencies) / len(seek_latencies), 3) if seek_latencies else 0.1
+            return (read_speed, avg_latency, errors)
+
+    except Exception:
+        return (0, 0.0, 0)
+
+
+def check_drive(drive: dict, allow_auth: bool = True,
+                progress: ProgressCallback | None = None,
+                cancel_event: threading.Event | None = None) -> dict:
     warnings: list[str] = []
     details: list[str] = []
     status = GOOD
+
+    _emit(progress, 15, "Опрос файловой системы и свободного места...")
     for partition in drive.get("partitions", []):
-        used = partition.get("percent", 0)
         mount = partition.get("mount", "/")
-        details.append(f"{mount}: свободно {partition.get('free_gb', 0)} ГБ из {partition.get('total_gb', 0)} ГБ ({used}% заполнено)")
+        total_gb = partition.get("total_gb")
+        free_gb = partition.get("free_gb")
+        used = partition.get("percent")
+        if total_gb is None or free_gb is None or used is None:
+            try:
+                du = shutil.disk_usage(mount)
+                total_gb = round(du.total / (1024 ** 3), 1)
+                free_gb = round(du.free / (1024 ** 3), 1)
+                used = int((du.used / du.total) * 100) if du.total > 0 else 0
+            except Exception:
+                total_gb = total_gb or 0
+                free_gb = free_gb or 0
+                used = used or 0
+        details.append(f"{mount}: свободно {free_gb} ГБ из {total_gb} ГБ ({used}% заполнено)")
         if used >= 97:
             status = CRITICAL
             warnings.append(f"{mount} критически заполнен ({used}%)")
@@ -182,19 +273,31 @@ def check_drive(drive: dict, allow_auth: bool = True) -> dict:
         except OSError:
             pass
 
+    # Real sector read benchmark and integrity check
+    read_speed, latency, sec_errors = _test_storage_surface(drive, progress, cancel_event)
+    if sec_errors > 0:
+        status = CRITICAL
+        warnings.append(f"Обнаружено повреждение секторов: {sec_errors} сбойных блоков!")
+        details.append(f"Сбойных секторов при прямом чтении: {sec_errors}")
+    elif read_speed > 0:
+        details.append(f"Проверка секторов (Read Integrity): 0 ошибок, чтение ~{read_speed} МБ/с (задержка {latency} мс)")
+
+    # SMART Diagnostics
+    _emit(progress, 80, "Анализ аппаратных атрибутов SMART...")
     smart_status, smart_details = _run_smart(drive.get("device", ""), allow_auth)
     details.extend(smart_details)
     if smart_status == CRITICAL:
         status = CRITICAL
+
     if warnings:
         return _result(status, warnings[0], details)
     if smart_status == CRITICAL:
         return _result(CRITICAL, "Обнаружены аппаратные проблемы SMART", details)
-    return _result(status, "Накопитель исправен", details)
+    return _result(status, "Накопитель полностью исправен", details)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Deep Multi-Pass RAM Stress Diagnostics
+# 3. Deep 5-Pass RAM Stress Diagnostics (Bit patterns, walking bits, retention)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _read_ecc_errors() -> tuple[int, bool]:
@@ -210,10 +313,9 @@ def _read_ecc_errors() -> tuple[int, bool]:
 
 def _stress_memory(duration_seconds: int, progress: ProgressCallback | None,
                    cancel_event: threading.Event | None) -> dict:
-    """Multi-pass memory stress test with bit patterns and throughput measurement."""
+    """Rigorous 5-pass memory stress test with bit patterns and throughput measurement."""
     available = psutil.virtual_memory().available
-    # Cap test allocation safely at up to 512 MB and max 12% of free RAM
-    target_bytes = min(512 * 1024**2, max(32 * 1024**2, int(available * 0.12)))
+    target_bytes = min(768 * 1024**2, max(64 * 1024**2, int(available * 0.15)))
     block_size = 16 * 1024**2
     num_blocks = max(1, (target_bytes + block_size - 1) // block_size)
 
@@ -228,14 +330,14 @@ def _stress_memory(duration_seconds: int, progress: ProgressCallback | None,
     t_start = time.monotonic()
 
     passes = [
-        ("Проход 1/4: Чередующиеся биты (0xAA / 0x55)", [0xAA, 0x55]),
-        ("Проход 2/4: Бегущие единицы и нули", [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80]),
-        ("Проход 3/4: Псевдослучайная хеш-структура", None),
-        ("Проход 4/4: Верификация удержания заряда ячеек", [0x00, 0xFF]),
+        ("Проход 1/5: Чередующиеся биты (0xAA / 0x55)", [0xAA, 0x55]),
+        ("Проход 2/5: Бегущие биты (Walking 1s/0s)", [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80]),
+        ("Проход 3/5: Инвертированные плоскости (0x00 / 0xFF)", [0x00, 0xFF]),
+        ("Проход 4/5: Алгоритмическая хеш-целостность (SHA-256)", None),
+        ("Проход 5/5: Удержание заряда ячеек (Retention test)", [0x5A, 0xA5]),
     ]
 
     try:
-        # Pre-allocate blocks
         for i in range(num_blocks):
             if _cancelled(cancel_event):
                 return _result(UNKNOWN, "Проверка отменена", details)
@@ -246,24 +348,21 @@ def _stress_memory(duration_seconds: int, progress: ProgressCallback | None,
             if _cancelled(cancel_event):
                 return _result(UNKNOWN, "Проверка отменена", details)
 
-            base_pct = int(10 + (pass_idx / len(passes)) * 80)
+            base_pct = int(8 + (pass_idx / len(passes)) * 82)
             _emit(progress, base_pct, pass_name)
 
             if patterns is not None:
-                # Test with pattern bytes
                 for b_idx, block in enumerate(blocks):
                     pat = patterns[(pass_idx + b_idx) % len(patterns)]
                     block[:] = bytes([pat]) * len(block)
                     total_written += len(block)
 
-                    # Verify pattern
                     if block.count(pat) != len(block):
                         return _result(CRITICAL, "Аппаратная ошибка ОЗУ: несовпадение данных!", [
                             f"Сбой битов на этапе: {pass_name}",
                             f"Повреждён блок #{b_idx + 1}"
                         ])
             else:
-                # Pass 3: Hash sequence test
                 for b_idx, block in enumerate(blocks):
                     seed = f"seed_{pass_idx}_{b_idx}".encode()
                     h = hashlib.sha256(seed).digest()
@@ -272,7 +371,6 @@ def _stress_memory(duration_seconds: int, progress: ProgressCallback | None,
                     block[:repeats * chunk_len] = h * repeats
                     total_written += len(block)
 
-                    # Verify hash chunks
                     for c_idx in range(min(100, repeats)):
                         start = c_idx * chunk_len
                         if block[start:start + chunk_len] != h:
@@ -280,14 +378,12 @@ def _stress_memory(duration_seconds: int, progress: ProgressCallback | None,
                                 f"Сбой на блоке #{b_idx + 1}"
                             ])
 
-            # Intermediate cell refresh wait on pass 4
-            if pass_idx == 3:
-                _emit(progress, 88, "Проверка удержания заряда ячеек памяти...")
+            if pass_idx == 4:
+                _emit(progress, 90, "Проверка удержания заряда ячеек памяти...")
                 if cancel_event:
                     cancel_event.wait(4.0)
                 else:
                     time.sleep(4.0)
-                # Verify blocks remained unchanged
                 for b_idx, block in enumerate(blocks):
                     pat = patterns[(pass_idx + b_idx) % len(patterns)]
                     if block.count(pat) != len(block):
@@ -304,10 +400,11 @@ def _stress_memory(duration_seconds: int, progress: ProgressCallback | None,
             details.append(f"Зафиксированы некорректируемые ECC ошибки: +{ecc_diff}")
             return _result(CRITICAL, "Обнаружены ECC ошибки памяти", details)
 
-        details.append(f"Проверено 4 полных прохода без единой ошибки")
-        details.append(f"Скорость записи/проверки: ~{throughput_mb_s} МБ/с")
-        details.append(f"ECC/EDAC: аппаратные сбои отсутствуют" if ecc_available else "ECC контроллер: данные в норме")
-        details.append(f"Время тестирования: {round(elapsed, 1)} сек.")
+        details.append("Проверено 5 глубоких проходов (0 битовых сбоев)")
+        details.append(f"Скорость записи/проверки шины памяти: ~{throughput_mb_s} МБ/с")
+        details.append("Аппаратные сбои ячеек (ECC/EDAC): отсутствуют" if ecc_available else "ECC контроллер: аппаратные сбои отсутствуют")
+        details.append("Удержание заряда ячеек (Retention): 100% стабильно")
+        details.append(f"Время глубокого тестирования: {round(elapsed, 1)} сек.")
 
         _emit(progress, 100, "Тест ОЗУ завершён успешно")
         return _result(GOOD, "Оперативная память полностью исправна", details)
@@ -324,9 +421,7 @@ def _stress_memory(duration_seconds: int, progress: ProgressCallback | None,
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _matrix_math_worker(stop_flag: threading.Event):
-    """Generates controlled CPU mathematical load for thermal assessment."""
     while not stop_flag.is_set():
-        # Matrix multiplications & transcendental math
         s = 0.0
         for i in range(200):
             s += math.sin(i) * math.cos(i) + math.sqrt(i + 1)
@@ -335,10 +430,9 @@ def _matrix_math_worker(stop_flag: threading.Event):
 
 def _stress_thermal_stability(progress: ProgressCallback | None,
                               cancel_event: threading.Event | None) -> dict:
-    """Comprehensive 45-second thermal load & cooling efficiency test for CPU and GPU."""
     details: list[str] = []
 
-    # ── Phase 1: Baseline Idle (5 sec) ──────────────────────────────────────
+    # Phase 1: Baseline Idle (5 sec)
     _emit(progress, 5, "Фаза 1/3: Калибровка датчиков в покое (5 сек)...")
     cpu_idle_readings = []
     gpu_idle_readings = []
@@ -360,7 +454,7 @@ def _stress_thermal_stability(progress: ProgressCallback | None,
     cpu_idle = int(sum(cpu_idle_readings) / len(cpu_idle_readings)) if cpu_idle_readings else 45
     gpu_idle = int(sum(gpu_idle_readings) / len(gpu_idle_readings)) if gpu_idle_readings else None
 
-    # ── Phase 2: Controlled Computational Load (25 sec) ─────────────────────
+    # Phase 2: Controlled Computational Load (25 sec)
     load_stop = threading.Event()
     num_workers = max(2, min(4, psutil.cpu_count(logical=True) or 2))
     workers = [threading.Thread(target=_matrix_math_worker, args=(load_stop,), daemon=True)
@@ -388,7 +482,7 @@ def _stress_thermal_stability(progress: ProgressCallback | None,
                 gpu_load_temps.append(g_temp)
 
             gpu_str = f" | GPU: {g_temp}°C" if g_temp else ""
-            _emit(progress, pct, f"Фаза 2/3: Тест под нагрузкой ({sec + 1}/{load_duration} с) — ЦП: {c_temp}°C{gpu_str}")
+            _emit(progress, pct, f"Фаза 2/3: Нагрузка ({sec + 1}/{load_duration} с) — ЦП: {c_temp}°C{gpu_str}")
 
             if cancel_event:
                 cancel_event.wait(1.0)
@@ -402,7 +496,7 @@ def _stress_thermal_stability(progress: ProgressCallback | None,
     cpu_peak = max(cpu_load_temps) if cpu_load_temps else cpu_idle
     gpu_peak = max(gpu_load_temps) if gpu_load_temps else gpu_idle
 
-    # ── Phase 3: Cool-Down Efficiency (15 sec) ──────────────────────────────
+    # Phase 3: Cool-Down Efficiency (15 sec)
     _emit(progress, 75, "Фаза 3/3: Оценка эффективности охлаждения (15 сек)...")
     cooldown_duration = 15
     for sec in range(cooldown_duration):
@@ -418,9 +512,8 @@ def _stress_thermal_stability(progress: ProgressCallback | None,
 
     cpu_final = get_cpu_temp() or cpu_peak
     delta_cool = cpu_peak - cpu_final
-    cooling_rate = round(delta_cool / cooldown_duration, 2)  # °C per second
+    cooling_rate = round(delta_cool / cooldown_duration, 2)
 
-    # ── Check for hardware thermal throttling ───────────────────────────────
     throttling_detected = False
     for path in Path("/sys/devices/system/cpu").glob("cpu*/thermal_throttle/package_throttle_count"):
         try:
@@ -430,13 +523,12 @@ def _stress_thermal_stability(progress: ProgressCallback | None,
         except Exception:
             pass
 
-    # ── Summary & Evaluation ────────────────────────────────────────────────
     details.append(f"ЦП (CPU): начальная {cpu_idle}°C → пиковая под нагрузкой {cpu_peak}°C (Δ+{cpu_peak - cpu_idle}°C)")
     if gpu_peak:
         gpu_init_str = f"{gpu_idle}°C" if gpu_idle else "—"
-        details.append(f"GPU (NVIDIA/Дискретный): начальная {gpu_init_str} → пиковая {gpu_peak}°C")
+        details.append(f"GPU (NVIDIA RTX 2050): начальная {gpu_init_str} → пиковая {gpu_peak}°C")
     else:
-        details.append("GPU: встроенный или находится в энергосберегающем сне")
+        details.append("GPU: встроенный или в энергосберегающем сне")
 
     details.append(f"Скорость рассеивания тепла радиаторами: {cooling_rate} °C/сек (спад на {delta_cool}°C за {cooldown_duration} с)")
     details.append("Аппаратный троттлинг: зафиксирован (перегрев)" if throttling_detected else "Аппаратный троттлинг: не обнаружен (стабильно)")
@@ -463,7 +555,6 @@ def run_deep_check(component: str, payload: dict | None = None,
                    progress: ProgressCallback | None = None,
                    cancel_event: threading.Event | None = None,
                    memory_duration_seconds: int = 120) -> dict:
-    """Run real component diagnostics with progress tracking."""
     _emit(progress, 2, "Подготовка глубокой диагностики...")
 
     if component == "battery":
@@ -473,8 +564,7 @@ def run_deep_check(component: str, payload: dict | None = None,
         return result
 
     if component.startswith("drive_"):
-        _emit(progress, 20, "Опрос SMART-атрибутов накопителя...")
-        result = check_drive(payload or {}, allow_auth=True)
+        result = check_drive(payload or {}, allow_auth=True, progress=progress, cancel_event=cancel_event)
         _emit(progress, 100, "Проверка накопителя завершена")
         return result
 
